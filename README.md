@@ -1,25 +1,25 @@
-# Решение тестового задания: Systems Administrator / Infrastructure Engineer
+# Инженерное решение: Systems Administrator / Infrastructure Engineer
 
 ## 1. Резервное копирование и Disaster Recovery
-- **Текущая Standalone-реализация:**
-  - Утилита: Restic (дедупликация CDC, шифрование).
-  - Хранилище: локальная директория `/var/backups/restic-repo`.
-  - Доставка пароля и инициализация: через Ansible (`/etc/restic/backup.pass`, права `0600`, автоматический `restic init` при первом запуске).
-  - Оркестрация: `systemd.timer` (`app-backup.timer`) с ротацией снапшотов (`forget --prune`).
-- **Целевая Production-архитектура:**
-  - Хранилище: S3 / Ceph с включенным режимом WORM (S3 Object Lock Compliance).
-  - Безопасность: хост с правами append-only (`PutObject`), ротация вынесена в изолированный Management-контур.
-  - Управление секретами: интеграция с HashiCorp Vault (AppRole).
-- **Расчетные метрики:** RPO <= 4 ч (инкремент 1–3 мин), RTO <= 30 мин (восстановление 100 ГБ по 1 Gbps).
-- **DR-тестирование:** скрипт `scripts/dr-restore-test.sh` проверяет репозиторий (`restic check`), восстанавливает снапшот и сверяет SHA-256 контрольные суммы.
+- Текущая реализация (Standalone):
+  - Restic, хранилище /var/backups/restic-repo.
+  - Безопасность: системный пользователь restic-backup без shell, права на данные через наследуемые POSIX ACL (rX).
+  - Пароль /etc/restic/backup.pass (права 0640), автоматический restic init при первом запуске через Ansible.
+  - Оркестрация: systemd.timer (app-backup.timer) с ротацией снапшотов (forget --prune).
+- Целевая Production-архитектура:
+  - Хранилище S3 / Ceph в режиме WORM (Object Lock Compliance).
+  - Изоляция: append-only права для агента бэкапа, удаление/ротация вынесены в Management-контур.
+  - Управление секретами через HashiCorp Vault (AppRole).
+- Расчетные метрики: RPO <= 4 ч, RTO <= 30 мин.
+- DR-тестирование: скрипт scripts/dr-restore-test.sh (restic check, восстановление и сверка SHA-256).
 
 ## 2. Docker Networking и сетевая диагностика
-- **Root Cause:** сокет сервиса слушал loopback (`127.0.0.1:8080`) вместо `0.0.0.0:8080`, внешний трафик сбрасывался хостом.
-- **Исправления:** маппинг `0.0.0.0:8080:80` в `docker/compose.yaml`, добавлен `healthcheck`.
-- **Скрипт диагностики:** `scripts/network-diagnostics.sh` (проверка сокетов `ss`, форвардинга `ip_forward`, iptables NAT, коллизий подсетей).
-- **Регламент сети:** безопасное применение настроек через `sudo netplan try --timeout 120`.
+- Root Cause: привязка порта к 127.0.0.1:8080 вместо 0.0.0.0:8080.
+- Исправления: публикация 0.0.0.0:8080:80 и healthcheck в docker/compose.yaml.
+- Скрипт диагностики: scripts/network-diagnostics.sh (проверка ss, ip_forward, iptables NAT, коллизии подсетей).
+- Регламент сети: безопасное применение сетевых настроек через netplan try --timeout 120.
 
 ## 3. Структура проекта
-- `ansible/` — плейбук `site.yml` и идемпотентная роль `backup_restic`
-- `docker/` — исправленный манифест `compose.yaml`
-- `scripts/` — скрипты `backup-app.sh`, `dr-restore-test.sh`, `network-diagnostics.sh`
+- ansible/ — плейбук site.yml, роль backup_restic (пользователь, ACL, restic init)
+- docker/ — исправленный compose.yaml
+- scripts/ — backup-app.sh (обработчик trap), dr-restore-test.sh (SHA-256), network-diagnostics.sh (коллизии)

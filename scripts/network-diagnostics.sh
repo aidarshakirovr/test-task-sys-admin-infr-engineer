@@ -1,38 +1,35 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-TARGET_PORT="${1:-8080}"
-echo "=========================================================="
-echo " Starting Network Diagnostics for Port :${TARGET_PORT}"
-echo "=========================================================="
+echo "=================================================="
+echo "    ДИАГНОСТИКА СЕТЕВОГО СТЕКА И DOCKER"
+echo "=================================================="
 
-echo -e "\n[1] Checking Socket Listeners (ss -tulpn):"
-LISTEN_INFO=$(ss -tulpn \vert{} grep ":${TARGET_PORT} " || true)
-if [ -z "${LISTEN_INFO}" ]; then
-    echo "[-] CRITICAL: No process listening on port ${TARGET_PORT}."
+echo -e "\n1. Прослушиваемые сокеты (ss -tulpn):"
+ss -tulpn | grep -E '8080|docker|LISTEN' || echo "Сокет 8080 не обнаружен"
+
+echo -e "\n2. Параметры ядра (IP Forwarding):"
+sysctl net.ipv4.ip_forward
+
+echo -e "\n3. Цепочки трансляции адресов Docker NAT (iptables):"
+sudo iptables -t nat -L DOCKER -n -v || echo "Цепочка DOCKER в iptables отсутствует"
+
+echo -e "\n4. Проверка коллизий подсетей (Docker Subnets vs Host Routes):"
+echo "--- Маршруты хоста (ip route) ---"
+ip route
+
+echo -e "\n--- Подсети Docker-сетей ---"
+if command -v docker &> /dev/null; then
+    docker network ls -q | while read -r net_id; do
+        SUBNET=$(docker network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
+        NAME=$(docker network inspect "$net_id" --format '{{.Name}}' 2>/dev/null || true)
+        if [[ -n "$SUBNET" ]]; then
+            echo "Сеть: ${NAME} -> Подсеть: ${SUBNET}"
+        fi
+    done
 else
-    echo "[+] Found listener:"
-    echo "${LISTEN_INFO}"
-    if echo "${LISTEN_INFO}" \vert{} grep -q "127.0.0.1:${TARGET_PORT}"; then
-        echo "[!] ROOT CAUSE: Port is bound exclusively to 127.0.0.1 (Loopback)!"
-    fi
+    echo "Docker демон не установлен или недоступен"
 fi
 
-echo -e "\n[2] Checking Kernel IP Forwarding:"
-IP_FW=$(sysctl -n net.ipv4.ip_forward)
-if [ "${IP_FW}" -eq 1 ]; then
-    echo "[+] OK: net.ipv4.ip_forward = 1 (Routing enabled)"
-else
-    echo "[-] CRITICAL: net.ipv4.ip_forward = 0"
-fi
-
-echo -e "\n[3] Checking Docker NAT Chain (iptables -t nat):"
-if sudo iptables -t nat -L DOCKER -n -v | grep -q "${TARGET_PORT}"; then
-    echo "[+] OK: Found DNAT rule for port ${TARGET_PORT}"
-else
-    echo "[!] WARN: No DNAT entry found in DOCKER chain"
-fi
-
-echo "=========================================================="
-echo " Diagnostics Completed"
-echo "=========================================================="
+echo -e "\n=================================================="
+echo "Диагностика завершена."

@@ -1,28 +1,69 @@
 ---
-- name: Install restic and acl
+- name: Install restic and acl utilities
   ansible.builtin.apt:
     name: [restic, acl]
     state: present
+    update_cache: yes
 
-- name: Create secure restic config dir
+- name: Create dedicated system group for backups
+  ansible.builtin.group:
+    name: "{{ restic_group }}"
+    system: yes
+    state: present
+
+- name: Create dedicated system user for backups
+  ansible.builtin.user:
+    name: "{{ restic_user }}"
+    group: "{{ restic_group }}"
+    system: yes
+    shell: /usr/sbin/nologin
+    create_home: no
+    state: present
+
+- name: Create secure configuration directory
   ansible.builtin.file:
     path: /etc/restic
     state: directory
-    mode: '0700'
+    owner: root
+    group: "{{ restic_group }}"
+    mode: '0750'
 
 - name: Deploy restic password file
   ansible.builtin.copy:
     content: "{{ restic_password }}\n"
     dest: "{{ restic_password_file }}"
-    mode: '0600'
+    owner: root
+    group: "{{ restic_group }}"
+    mode: '0640'
 
-- name: Ensure backup destination directory exists
+- name: Create backup repository directory
   ansible.builtin.file:
     path: "{{ restic_repo_path }}"
     state: directory
+    owner: "{{ restic_user }}"
+    group: "{{ restic_group }}"
     mode: '0750'
 
-- name: Check if restic repository is initialized
+- name: Apply POSIX ACL (read/traverse) for restic user on source data
+  ansible.posix.acl:
+    path: "{{ backup_source_dir }}"
+    entity: "{{ restic_user }}"
+    etype: user
+    permissions: "rX"
+    state: present
+    recursive: yes
+
+- name: Apply default POSIX ACL for inheritance on future files
+  ansible.posix.acl:
+    path: "{{ backup_source_dir }}"
+    entity: "{{ restic_user }}"
+    etype: user
+    permissions: "rX"
+    state: present
+    default: yes
+    recursive: yes
+
+- name: Check if restic repository is already initialized
   ansible.builtin.stat:
     path: "{{ restic_repo_path }}/config"
   register: restic_repo_config
@@ -30,18 +71,23 @@
 - name: Initialize restic repository if not present
   ansible.builtin.command: >
     restic init --repo "{{ restic_repo_path }}" --password-file "{{ restic_password_file }}"
+  become_user: "{{ restic_user }}"
   when: not restic_repo_config.stat.exists
 
 - name: Deploy backup script
   ansible.builtin.template:
     src: backup-app.sh.j2
     dest: /usr/local/bin/backup-app.sh
+    owner: root
+    group: "{{ restic_group }}"
     mode: '0750'
 
 - name: Deploy systemd service unit
   ansible.builtin.template:
     src: app-backup.service.j2
     dest: /etc/systemd/system/app-backup.service
+    owner: root
+    group: root
     mode: '0644'
   notify: Reload systemd
 
@@ -49,6 +95,8 @@
   ansible.builtin.template:
     src: app-backup.timer.j2
     dest: /etc/systemd/system/app-backup.timer
+    owner: root
+    group: root
     mode: '0644'
   notify:
     - Reload systemd

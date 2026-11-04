@@ -1,5 +1,5 @@
 [Unit]
-Description=Restic Application Data Backup
+Description=Automated Restic Backup Service
 After=network-online.target
 Wants=network-online.target
 
@@ -8,11 +8,8 @@ Type=oneshot
 User={{ restic_user }}
 Group={{ restic_group }}
 ExecStart=/usr/local/bin/backup-app.sh
+PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={{ restic_repo_path }} /var/cache/restic
-PrivateTmp=true
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
+ReadWritePaths={{ restic_repo_path }} /tmp
+ReadOnlyPaths={{ backup_source_dir }} {{ restic_password_file }}

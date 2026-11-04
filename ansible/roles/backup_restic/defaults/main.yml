@@ -1,4 +1,6 @@
 ---
+restic_user: "restic-backup"
+restic_group: "restic-backup"
 restic_repo_path: "/var/backups/restic-repo"
 restic_password_file: "/etc/restic/backup.pass"
 restic_password: "ChangeMeSecurePassword2026!"
