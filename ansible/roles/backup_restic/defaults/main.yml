@@ -5,18 +5,32 @@ restic_cache_dir: "/var/cache/restic-backup"
 restic_password_file: "/etc/restic/backup.pass"
 backup_source_dir: "/srv/app/data"
 
+# Поддержка гибридного хранения (3-2-1): local или s3
 restic_backend: "local"
-restic_repo_path: "/var/backups/restic-repo"
+restic_local_repo_path: "/var/backups/restic-repo"
+restic_s3_repo_path: "s3:{{ s3_endpoint }}/{{ s3_bucket }}"
+restic_repo_path: "{{ restic_s3_repo_path if restic_backend == 's3' else restic_local_repo_path }}"
 
-s3_endpoint: "https://s3.amazonaws.com"
+s3_endpoint: "[https://s3.amazonaws.com](https://s3.amazonaws.com)"
 s3_bucket: "company-infrastructure-backups"
 aws_access_key: "{{ vault_s3_access_key | default('') }}"
 aws_secret_key: "{{ vault_s3_secret_key | default('') }}"
 
+# Расписание (RPO <= 4 часа) и политика GFS-ротации
 restic_schedule: "*-*-* 00/4:00:00"
 restic_keep_hourly: 24
 restic_keep_daily: 14
-restic_keep_weekly: 4
+restic_keep_weekly: 8
 restic_keep_monthly: 6
 
-restic_password: "{{ vault_restic_password | default('') }}"
+# Оптимизация для объема 100 ГБ (исключения и I/O приоритеты)
+restic_excludes:
+  - "*.tmp"
+  - "*.log"
+  - ".cache/*"
+  - "lost+found"
+restic_ionice_class: 2
+restic_ionice_level: 7
+restic_nice_level: 19
+
+restic_password: "{{ vault_restic_password | default('dev-test-password-change-me') }}"
