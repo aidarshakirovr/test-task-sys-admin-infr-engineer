@@ -30,8 +30,8 @@ if [[ -f "${SOURCE_FILE}" ]]; then
     SRC_HASH=$(sha256sum "${SOURCE_FILE}" | awk '{print $1}')
     RST_HASH=$(sha256sum "${RESTORED_FILE}" | awk '{print $1}')
     
-    echo "Исходный хэш:      ${SRC_HASH}"
-    echo "Восстановленный:   ${RST_HASH}"
+    echo "Исходный хэш:    ${SRC_HASH}"
+    echo "Восстановленный: ${RST_HASH}"
     
     if [[ "${SRC_HASH}" != "${RST_HASH}" ]]; then
         echo "[FAIL] Несовпадение контрольных сумм SHA-256!" >&2
