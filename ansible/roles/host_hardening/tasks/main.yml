@@ -111,7 +111,7 @@
     action: insert
   loop:
     - { ctstate: "ESTABLISHED,RELATED" }
-    - { proto: "tcp", port: "8080" }
+    - { proto: "tcp", port: "{{ hardening_app_port }}" }
   when: hardening_docker_user_rules | bool
   failed_when: false
 

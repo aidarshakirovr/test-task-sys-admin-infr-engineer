@@ -22,11 +22,14 @@ A plain file-level backup of live DB files can restore a crash-consistent tree o
 ## 3. Storage, offsite copy, ransomware protection
 
 - Primary repository: local and/or S3 (`restic_backend`).
-- Offsite: enable `restic_copy_enabled` so each backup runs `restic copy` into `restic_secondary_repo_path` (second bucket or append-only rest-server).
-- Application-host S3 keys must be **without DeleteObject** (write/list only). `forget --prune` runs only from a separate admin host via `ansible/playbooks/backup-retention.yml`.
-- Prefer S3 Object Lock (Compliance) or rest-server append-only, configured outside this role's defaults and verified before claiming immutability.
+- Offsite: enable `restic_copy_enabled` so each backup runs `restic copy` into `restic_secondary_repo_path`. Production asserts require copy + distinct secondary password.
+- App-host IAM: allow `DeleteObject` **only under `locks/`** (restic lock release). Deny delete on data keys. See `docs/S3_OBJECT_LOCK_AND_IAM.md`. Optional `restic_no_lock` (default false) if locks/ delete is impossible — risky.
+- `forget --prune` only from `backup_admin` with delete-capable keys (`ansible/playbooks/backup-retention.yml`).
+- **Object Lock is NOT configured by this role.** Compliance mode blocks prune of locked objects; use Governance, lifecycle expiry, or accept delayed prune. Verify manually before claiming immutability.
 
 A local repo on the app host alone is **not** ransomware-resistant.
+
+Full restore timing template: `docs/examples/full-restore-timing.template.md` (RTO stays a hypothesis until filled).
 
 ## 4. Restore runbooks
 
@@ -63,9 +66,12 @@ sudo -u restic-backup \
   RESTIC_REPOSITORY=/var/backups/restic-repo \
   RESTIC_PASSWORD_FILE=/etc/restic/backup.pass \
   BACKUP_SOURCE_DIR=/srv/app/data \
-  DR_SMOKE_CMD='curl -fsS http://127.0.0.1:8080/ >/dev/null' \
+  DR_SMOKE_CMD='cd "$RESTORE_TARGET/srv/app/data" && python3 -m http.server 18080 & sleep 1; curl -fsS http://127.0.0.1:18080/ >/dev/null' \
   bash scripts/dr-restore-test.sh
 ```
+
+Smoke must hit **restored/staging** paths (or a staging host), not live production `:8080`.  
+Optional: `DR_READ_DATA_SUBSET=100%` and `DR_CHECK_OWNERSHIP=1`.
 
 For S3/offsite, export `RESTIC_REPOSITORY=s3:...` and load AWS env (`/etc/restic/aws.env`).
 

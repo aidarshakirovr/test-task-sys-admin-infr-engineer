@@ -37,6 +37,13 @@ Symptoms typically: container is up, app answers inside the container and on the
    - From the client: resolve the name and compare with the expected server IP.
    - Wrong DNS can look like a “network change” incident.
 
+8. **Additional hypotheses (not only Docker∩LAN)**
+   - `rp_filter=1` + asymmetric routing dropping return traffic.
+   - MTU / PMTUD blackhole (large responses fail; try smaller MSS or check ICMP fragmentation-needed).
+   - Conntrack table full / stale entries (`conntrack -L` / dmesg).
+   - UFW `DEFAULT_FORWARD_POLICY=DROP` without `ufw route` / DOCKER-USER allowances.
+   - `iptables-nft` vs legacy mismatch after mixed tooling.
+
 ## Safe production network changes
 
 - Capture baseline (`ip addr`, `ip route`, `iptables-save` / nft, Docker daemon.json).

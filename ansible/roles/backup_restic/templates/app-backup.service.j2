@@ -27,7 +27,12 @@ CapabilityBoundingSet=CAP_DAC_READ_SEARCH
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={{ restic_local_repo_path if restic_backend == "local" else restic_cache_dir }} {{ restic_cache_dir }}
+# Local backend: repo dir + cache are writable. S3 backend: only cache (remote objects via API).
+{% if restic_backend == "local" %}
+ReadWritePaths={{ restic_local_repo_path }} {{ restic_cache_dir }}
+{% else %}
+ReadWritePaths={{ restic_cache_dir }}
+{% endif %}
 ReadOnlyPaths={{ backup_source_dir }} {{ restic_password_file }}{% if restic_copy_enabled | bool %} {{ restic_secondary_password_file }}{% endif %}
 {% if restic_backend == "s3" or (restic_copy_enabled | bool and restic_secondary_backend == "s3") %}
 ReadOnlyPaths={{ restic_aws_env_file }}

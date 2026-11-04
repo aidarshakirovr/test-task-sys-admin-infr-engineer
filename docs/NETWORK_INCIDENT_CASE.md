@@ -83,4 +83,6 @@ Set non-colliding pools in `/etc/docker/daemon.json` (role `host_hardening`):
 
 **Important:** pools apply only to **new** networks. Restarting Docker stops containers (maintenance window). Recreate existing overlapping networks manually, then re-check `ip route get <client>`.
 
+Also check: `rp_filter`, MTU/PMTUD, conntrack, UFW forward policy / `ufw route`, iptables-nft vs legacy — see runbook §8.
+
 See also `docs/NETWORK_INCIDENT_RUNBOOK.md` and `scripts/network-diagnostics.sh`.

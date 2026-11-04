@@ -39,8 +39,16 @@ fi
 # If /srv/app/data holds a live DB, set restic_pre_backup_hook to a dump/snapshot script.
 {% endif %}
 
+{% if restic_no_lock | bool %}
+# WARNING: restic_no_lock=true — repository locking disabled.
+NO_LOCK_ARGS=(--no-lock)
+{% else %}
+NO_LOCK_ARGS=()
+{% endif %}
+
 echo "[INFO] Starting restic backup of ${BACKUP_SOURCE}..."
 restic backup \
+    "${NO_LOCK_ARGS[@]}" \
     --repo "${RESTIC_REPOSITORY}" \
     --password-file "${RESTIC_PASSWORD_FILE}" \
     --tag "app-data" \
@@ -52,6 +60,7 @@ restic backup \
 {% if restic_copy_enabled | bool %}
 echo "[INFO] Copying new snapshots to secondary (offsite) repository..."
 restic copy \
+    "${NO_LOCK_ARGS[@]}" \
     --repo "${RESTIC_SECONDARY_REPOSITORY}" \
     --password-file "${RESTIC_SECONDARY_PASSWORD_FILE}" \
     --from-repo "${RESTIC_REPOSITORY}" \

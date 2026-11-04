@@ -1,6 +1,6 @@
 ---
 - name: Deploy host hardening baseline
-  hosts: backup_servers
+  hosts: backup_servers:app_servers
   become: true
   roles:
     - role: host_hardening
@@ -12,3 +12,31 @@
   roles:
     - role: backup_restic
       tags: [backup]
+
+- name: Deploy example docker compose app
+  hosts: app_servers
+  become: true
+  tags: [app, compose]
+  tasks:
+    - name: Ensure compose project directory exists
+      ansible.builtin.file:
+        path: /opt/app
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy example compose file
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../docker/compose.yaml"
+        dest: /opt/app/compose.yaml
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Start compose stack when docker compose is available
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/app/compose.yaml, up, -d]
+      register: compose_up
+      changed_when: "'Started' in (compose_up.stdout | default('')) or 'Created' in (compose_up.stdout | default(''))"
+      failed_when: false

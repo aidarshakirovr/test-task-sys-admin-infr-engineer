@@ -6,11 +6,15 @@ hardening_ssh_pubkey_authentication: "yes"
 hardening_ssh_deploy_user: "{{ ansible_user | default('deployer') }}"
 hardening_sshd_dropin_path: "/etc/ssh/sshd_config.d/99-hardening.conf"
 
+# Published application port (compose maps host:container).
+hardening_app_port: "8080"
+app_publish_port: "{{ hardening_app_port }}"
+
 # Allow required access BEFORE enabling UFW to avoid lockout.
 hardening_ufw_enabled: true
 hardening_ufw_allow:
   - { port: "22", proto: "tcp", comment: "SSH" }
-  - { port: "8080", proto: "tcp", comment: "app published port" }
+  - { port: "{{ hardening_app_port }}", proto: "tcp", comment: "app published port" }
 
 # Persist DOCKER-USER allowances across reboot via /etc/ufw/after.rules.
 hardening_docker_user_rules: true

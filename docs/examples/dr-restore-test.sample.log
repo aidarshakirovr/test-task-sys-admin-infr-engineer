@@ -1,41 +1,36 @@
-# SAMPLE ONLY — synthetic fixture for reviewers / CI docs.
-# Not captured from a production host. Do not treat timings as measured RTO.
+# EXAMPLE / SAMPLE ONLY — synthetic fixture for reviewers.
+# Not captured from production. Do not treat timings as measured RTO.
+# Smoke must use restored/staging paths — never live prod localhost.
 
 === 0. Timing start: 2026-11-04T18:10:12+03:00 ===
+[INFO] RESTORE_TARGET=/var/tmp/restic-dr-verify.SAMPLE
+
 === 1. Repository snapshot availability ===
-repository is already locked by PID 0 on sample-host by sample (UID 0)
 ID        Time                 Host        Tags        Paths
 ---------------------------------------------------------------
 a1b2c3d4  2026-11-04 18:09:39  app-01      app-data    /srv/app/data
 ---------------------------------------------------------------
-1 snapshots
 
-=== 2. Repository integrity check (10% data subset) ===
-using temporary cache in /tmp/restic-check-cache
-create exclusive lock for repository
-load indexes
-check all packs
-check snapshots, trees and blobs
-[0:12] 100.00%  64 / 64 packs read
+=== 2. Repository integrity check (read-data-subset=10%) ===
 no errors were found
 
 === 3. Select up to 20 RANDOM files from snapshot latest ===
 selected 20 paths from restic ls (not from live disk)
 
 === 4. Restore selected files into an isolated temporary directory ===
-restoring <Snapshot a1b2c3d4 of [/srv/app/data] at 2026-11-04 18:09:39> to /var/tmp/restic-dr-verify.SAMPLE
+restoring <Snapshot a1b2c3d4> to /var/tmp/restic-dr-verify.SAMPLE
 
 === 5. Compare SHA-256 of restored files vs restic dump (snapshot truth) ===
 [OK] /srv/app/data/config/app.yaml
 [OK] /srv/app/data/state/queue/item-17.json
-[OK] /srv/app/data/blobs/f3/a9c1.bin
-[OK] /srv/app/data/blobs/0e/77d2.bin
-[OK] /srv/app/data/logs/rotated/app.log.3
-... (15 more OK lines omitted in sample) ...
-[OK] /srv/app/data/meta/version
+... (sample lines omitted) ...
 
-=== 6. Optional application smoke test ===
-curl -fsS http://127.0.0.1:8080/ >/dev/null
+=== 6. Optional smoke test (must target staging/restored path, not live prod) ===
+[INFO] DR_SMOKE_CMD runs with RESTORE_TARGET=/var/tmp/restic-dr-verify.SAMPLE
+# EXAMPLE smoke against restored tree (python http.server on staging path):
+#   cd "$RESTORE_TARGET/srv/app/data" && python3 -m http.server 18080 &
+#   curl -fsS http://127.0.0.1:18080/config/app.yaml >/dev/null
+curl -fsS http://127.0.0.1:18080/config/app.yaml >/dev/null
 
 [SUCCESS] DR sample restore passed (20 files) in 47s.
-[INFO] This is not a full 100GB restore timing; record a quarterly full restore separately.
+[INFO] Not a full 100GB restore; record quarterly full restore separately.

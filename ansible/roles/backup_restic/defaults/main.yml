@@ -21,10 +21,15 @@ restic_repo_path: "{{ restic_s3_repo_path if restic_backend == 's3' else restic_
 restic_primary_repo_path: "{{ restic_repo_path }}"
 
 # Optional second repository for offsite copy after each backup (restic copy).
-# Prefer a bucket/key without DeleteObject; prune runs only from an admin host.
+# App-host IAM: prefer DeleteObject ONLY under locks/ (restic needs lock release).
+# Full no-DeleteObject without locks/ access requires restic_no_lock=true (risky).
+# See docs/S3_OBJECT_LOCK_AND_IAM.md. Prune/delete of data keys: admin host only.
 restic_copy_enabled: false
 restic_secondary_backend: "s3"
 restic_secondary_repo_path: "s3:{{ s3_endpoint }}/{{ s3_bucket }}-offsite"
+# WARNING: --no-lock disables repository locking. Default false. Use only with
+# documented external locking / single-writer guarantee.
+restic_no_lock: false
 
 # Supply secrets through Ansible Vault; empty defaults intentionally fail validation.
 restic_password: "{{ vault_restic_password | default('') }}"

@@ -1,0 +1,11 @@
+---
+# Production admin / break-glass for forget --prune.
+# Requires IAM with DeleteObject on data keys (Object Lock Governance or unlocked).
+# Compliance-mode locked objects cannot be pruned until retention expires — see docs.
+restic_password_file: /etc/restic/backup.pass
+restic_secondary_password_file: /etc/restic/backup-secondary.pass
+restic_keep_hourly: 24
+restic_keep_daily: 14
+restic_keep_weekly: 8
+restic_keep_monthly: 6
+restic_prune_dual: true

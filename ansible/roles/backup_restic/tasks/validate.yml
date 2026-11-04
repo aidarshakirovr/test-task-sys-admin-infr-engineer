@@ -33,6 +33,32 @@
     fail_msg: "restic_copy_enabled requires a distinct restic_secondary_repo_path."
   when: restic_copy_enabled | bool
 
+- name: Require offsite copy in production
+  ansible.builtin.assert:
+    that:
+      - restic_copy_enabled | bool
+      - restic_secondary_repo_path | length > 0
+    fail_msg: >-
+      env=production requires restic_copy_enabled and a secondary repo.
+      Verify Object Lock / IAM manually (docs/S3_OBJECT_LOCK_AND_IAM.md).
+  when: (env | default('')) == 'production'
+
+- name: Require distinct secondary password in production
+  ansible.builtin.assert:
+    that:
+      - restic_secondary_password != restic_password
+    fail_msg: >-
+      Production offsite must use vault_restic_secondary_password distinct from primary.
+  no_log: true
+  when:
+    - (env | default('')) == 'production'
+    - restic_copy_enabled | bool
+
+- name: Warn when restic_no_lock is enabled
+  ansible.builtin.debug:
+    msg: "WARNING: restic_no_lock=true disables repository locking. Ensure single-writer semantics."
+  when: restic_no_lock | bool
+
 - name: Build S3 environment for restic commands
   ansible.builtin.set_fact:
     restic_s3_environment: "{{ {'AWS_ACCESS_KEY_ID': aws_access_key, 'AWS_SECRET_ACCESS_KEY': aws_secret_key} if (restic_backend == 's3' or (restic_copy_enabled | bool and restic_secondary_backend == 's3')) else {} }}"

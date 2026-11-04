@@ -54,23 +54,17 @@ Docker `daemon.json` changes restart the daemon (containers stop — maintenance
 
 | Item | Status |
 |------|--------|
-| CI syntax-check / ansible-lint / shellcheck | Covered by `.github/workflows/validate.yml` |
-| Local `bash -n` / syntax-check | Run commands below (or rely on CI) |
+| CI workflow file | `.github/workflows/validate.yml` + `scripts/ci-local.sh` in repo; enable Actions after push |
+| Local `bash scripts/ci-local.sh` | Preferred local gate |
 | Ansible `--check` on disposable staging VM | **Not run here** — no staging VM in this workspace; run before prod |
-| Live S3 Object Lock / append-only rest-server | **Must be configured and tested outside defaults** |
-| Full 100 GB restore timing (RTO) | **Not measured** — hypothesis only |
-| Sample DR log | `docs/examples/dr-restore-test.sample.log` is a **SAMPLE fixture**, not a live host capture |
+| Live S3 Object Lock / IAM | **Manual** — see `docs/S3_OBJECT_LOCK_AND_IAM.md` (not auto-configured) |
+| Full 100 GB restore timing (RTO) | **Hypothesis** — fill `docs/examples/full-restore-timing.template.md` |
+| Sample DR log | EXAMPLE fixture only |
 
 ## Validation
 
 ```bash
-ansible-galaxy collection install -r ansible/requirements.yml
-ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/site.yml --syntax-check
-ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/playbooks/backup-retention.yml --syntax-check
-bash -n scripts/network-diagnostics.sh scripts/dr-restore-test.sh
-# optional if installed:
-# ansible-lint ansible/site.yml ansible/playbooks/backup-retention.yml
-# shellcheck scripts/*.sh
+bash scripts/ci-local.sh
 ```
 
 Run Ansible `--check --diff` against a disposable staging VM before production (not available in this workspace). Do not run the DR test until the repository and password file already exist.

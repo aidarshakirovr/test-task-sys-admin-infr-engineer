@@ -4,6 +4,8 @@ set -Eeuo pipefail
 section() { printf '\n=== %s ===\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+APP_PORT="${APP_PORT:-${HARDENING_APP_PORT:-8080}}"
+
 section "1. Listening sockets and forwarding"
 if have ss; then
   ss -tulpn || true
@@ -12,6 +14,7 @@ else
 fi
 if have sysctl; then
   sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding 2>/dev/null || true
+  sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter 2>/dev/null || true
 fi
 
 section "2. Addresses and routing"
@@ -23,12 +26,18 @@ ip rule show 2>/dev/null || true
 section "3. Firewall and NAT"
 if have ufw; then
   sudo ufw status verbose || true
+  if [[ -f /etc/default/ufw ]]; then
+    grep -E 'DEFAULT_FORWARD_POLICY|IPT_SYSCTL' /etc/default/ufw 2>/dev/null || true
+  fi
+  sudo ufw status | grep -i route || true
 fi
 if have iptables; then
+  echo "[INFO] iptables backend: $(iptables -V 2>/dev/null || true)"
   sudo iptables -S DOCKER-USER 2>/dev/null || echo "[INFO] DOCKER-USER chain unavailable"
   # sed reads the full stream, avoiding the SIGPIPE that head can cause with pipefail.
   sudo iptables -L FORWARD -n -v --line-numbers 2>/dev/null | sed -n '1,15p' || true
   sudo iptables -t nat -L DOCKER -n -v --line-numbers 2>/dev/null || true
+  sudo iptables -L -n -v 2>/dev/null | grep -i conntrack | sed -n '1,10p' || true
 fi
 if have nft; then
   sudo nft list ruleset 2>/dev/null | sed -n '1,160p' || true
@@ -94,7 +103,7 @@ fi
 section "6. Task-2 style checks (bind, publish, route-to-client)"
 # Bind must be 0.0.0.0 (or expected iface), not only 127.0.0.1.
 if have ss; then
-  ss -tlnp | grep -E ':8080\b' || echo "[INFO] nothing listening on :8080"
+  ss -tlnp | grep -E ":${APP_PORT}\\b" || echo "[INFO] nothing listening on :${APP_PORT}"
 fi
 if ((${#DOCKER[@]})); then
   while IFS= read -r cname; do

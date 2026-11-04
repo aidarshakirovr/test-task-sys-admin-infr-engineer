@@ -1,0 +1,10 @@
+---
+# Staging admin context for forget/prune (--check/--syntax).
+# Provide vault_restic_password via Vault; delete-capable keys only on admin.
+restic_password_file: /etc/restic/backup.pass
+restic_secondary_password_file: /etc/restic/backup-secondary.pass
+restic_keep_hourly: 24
+restic_keep_daily: 14
+restic_keep_weekly: 8
+restic_keep_monthly: 6
+restic_prune_dual: true
