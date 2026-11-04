@@ -1,0 +1,21 @@
+=== REAL ci-local run at 2026-11-05T08:48:38+0300 (Windows + Git bash) ===
+PATH_HEAD=/c/Users/Aidar/AppData/Roaming/Python/Python314/Scripts
+/c/Users/Aidar/AppData/Roaming/Python/Python314/Scripts/ansible-galaxy
+/c/Users/Aidar/AppData/Roaming/Python/Python314/Scripts/ansible-playbook
+== tools ==
+/c/Users/Aidar/AppData/Roaming/Python/Python314/Scripts/ansible-galaxy
+/c/Users/Aidar/AppData/Roaming/Python/Python314/Scripts/ansible-playbook
+/c/Users/Aidar/AppData/Roaming/Python/Python314/Scripts/ansible-lint
+== galaxy ==
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Aidar\AppData\Roaming\Python\Python314\Scripts\ansible-galaxy.exe\__main__.py", line 2, in <module>
+    from ansible.cli.galaxy import main
+  File "C:\Users\Aidar\AppData\Roaming\Python\Python314\site-packages\ansible\cli\__init__.py", line 54, in <module>
+    check_blocking_io()
+    ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Aidar\AppData\Roaming\Python\Python314\site-packages\ansible\cli\__init__.py", line 46, in check_blocking_io
+    if not os.get_blocking(fd):
+           ~~~~~~~~~~~~~~~^^^^
+OSError: [WinError 87] Параметр задан неверно

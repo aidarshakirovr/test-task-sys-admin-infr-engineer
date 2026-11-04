@@ -1,10 +1,11 @@
 ---
 # Run ONLY from a separate admin host / break-glass identity.
-# Application backup hosts must not receive delete permissions on the S3 bucket.
+# Staging lab: backup_admin may be localhost (same machine) — OK for syntax/--check only.
+# Production: use a real break-glass host with vault_s3_admin_* delete-capable keys.
 #
 # Example:
 #   ansible-playbook -i ansible/inventories/staging/hosts.ini \
-#     ansible/playbooks/backup-retention.yml --check --diff
+#     ansible/playbooks/backup-retention.yml --ask-vault-pass --check --diff
 
 - name: Apply Restic retention (forget --prune) from admin context
   hosts: backup_admin
@@ -13,12 +14,25 @@
     retention_primary: "{{ restic_primary_repo_path | default(restic_local_repo_path) }}"
     retention_secondary: "{{ restic_secondary_repo_path | default('', true) }}"
     retention_targets: "{{ ([retention_primary] + ([retention_secondary] if (restic_prune_dual | default(true) | bool and retention_secondary | length > 0 and retention_secondary != retention_primary) else [])) }}"
+  pre_tasks:
+    - name: Load backup_restic role defaults for retention vars
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/backup_restic/defaults/main.yml"
+
+    - name: Prefer admin S3 credentials when provided
+      ansible.builtin.set_fact:
+        restic_s3_environment: "{{ {'AWS_ACCESS_KEY_ID': vault_s3_admin_access_key, 'AWS_SECRET_ACCESS_KEY': vault_s3_admin_secret_key} if ((vault_s3_admin_access_key | default('')) | length > 0) else (restic_s3_environment | default({})) }}"
+      no_log: true
+      when: (vault_s3_admin_access_key | default('')) | length > 0
+
   tasks:
     - name: Require restic password
       ansible.builtin.assert:
         that:
           - restic_password | length >= 20
-        fail_msg: "Provide vault_restic_password for retention runs."
+          - restic_password_file is string
+          - restic_password_file | length > 0
+        fail_msg: "Provide vault_restic_password and restic_password_file for retention runs."
       no_log: true
 
     - name: Require at least one retention repository

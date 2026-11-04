@@ -1,0 +1,10 @@
+---
+# Lightweight syntax smoke for CI / scripts/ci-local.sh
+- name: Smoke syntax for site and retention
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Confirm inventory groups exist conceptually
+      ansible.builtin.debug:
+        msg: "Run ansible-playbook --syntax-check via scripts/ci-local.sh"

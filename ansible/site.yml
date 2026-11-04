@@ -26,7 +26,7 @@
         group: root
         mode: "0755"
 
-    - name: Copy example compose file
+    - name: Deploy compose file
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../docker/compose.yaml"
         dest: /opt/app/compose.yaml
@@ -34,9 +34,28 @@
         group: root
         mode: "0644"
 
-    - name: Start compose stack when docker compose is available
+    - name: Deploy compose env for publish port/IP
+      ansible.builtin.copy:
+        dest: /opt/app/.env
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          APP_PUBLISH_IP={{ app_publish_ip | default('127.0.0.1') }}
+          APP_PUBLISH_PORT={{ app_publish_port | default(hardening_app_port | default('8080')) }}
+
+    - name: Check docker compose availability
       ansible.builtin.command:
-        argv: [docker, compose, -f, /opt/app/compose.yaml, up, -d]
+        argv: [docker, compose, version]
+      register: docker_compose_version
+      changed_when: false
+      failed_when: docker_compose_version.rc != 0
+
+    - name: Start compose stack
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/app/compose.yaml, --env-file, /opt/app/.env, up, -d]
       register: compose_up
-      changed_when: "'Started' in (compose_up.stdout | default('')) or 'Created' in (compose_up.stdout | default(''))"
-      failed_when: false
+      changed_when: >-
+        ('Started' in (compose_up.stdout | default(''))) or
+        ('Created' in (compose_up.stdout | default(''))) or
+        (compose_up.rc == 0)

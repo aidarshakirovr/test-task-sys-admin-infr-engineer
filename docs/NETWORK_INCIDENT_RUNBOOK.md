@@ -4,50 +4,54 @@ Symptoms typically: container is up, app answers inside the container and on the
 
 ## Order of checks
 
-1. **Client-side reachability**
-   - From an affected client: `curl -v --connect-timeout 5 http://SERVER_IP:PORT/` and/or `nc -vz SERVER_IP PORT`.
-   - Record whether the failure is **timeout** (filtered/blackhole/routing) or **refused** (nothing listening on that path).
+1. **Client-side reachability** — `curl`/`nc`; note timeout vs refused.
+2. **Listen address** — `ss -tlnp`; expect `0.0.0.0:PORT` not only `127.0.0.1`.
+3. **Docker publish** — `docker port CONTAINER`.
+4. **Firewall / NAT** — UFW, `DOCKER-USER`, FORWARD, nat; watch counters; no blind deletes.
+5. **Routing / overlap** — `ip route get CLIENT_IP` + Docker subnets.
+6. **tcpdump** while reproducing.
+7. **DNS** if clients use a name.
 
-2. **Listen address on the server**
-   - `ss -tlnp | grep PORT`
-   - Confirm bind is `0.0.0.0:PORT` (or the expected interface), not only `127.0.0.1:PORT`.
+Helper: `APP_PORT=8080 bash scripts/network-diagnostics.sh`
 
-3. **Docker publish mapping**
-   - `docker port CONTAINER`
-   - `docker inspect CONTAINER --format '{{json .HostConfig.PortBindings}}'`
-   - Confirm host IP/port mapping matches what clients use.
+## Hypotheses (illustrative): commands + expected symptoms
 
-4. **Firewall and Docker chains (read counters, do not delete blindly)**
-   - `ufw status verbose`
-   - `iptables -L FORWARD -n -v --line-numbers`
-   - `iptables -S DOCKER-USER`
-   - `iptables -t nat -L DOCKER -n -v --line-numbers`
-   - Prefer one scoped change with a tested rollback. Do **not** mass-delete “contradictory” rules.
+### A. Docker subnet ∩ LAN
 
-5. **Routing and Docker subnet overlap**
-   - `ip route get CLIENT_IP`
-   - Compare host routes with Docker networks (`docker network inspect` / `scripts/network-diagnostics.sh`).
-   - Overlap with LAN (classic `172.17.0.0/16`) is fixed via `/etc/docker/daemon.json` `default-address-pools` (see role `host_hardening`), then recreate networks.
+- **Commands:** `ip route get CLIENT_IP`; `docker network inspect bridge`; compare with LAN CIDR.
+- **Symptoms:** Client timeout; `ip route get` exits via `docker0`; host-local curl works.
+- **Fix direction:** `default-address-pools` in daemon.json; recreate networks (maintenance window).
 
-6. **Packet capture**
-   - While reproducing from the client: `tcpdump -ni any host CLIENT_IP and port PORT`
-   - Decide if SYN arrives, if SYN-ACK leaves, or if traffic is dropped on FORWARD/NAT.
+### B. rp_filter + asymmetric routing
 
-7. **DNS (if clients use a name)**
-   - From the client: resolve the name and compare with the expected server IP.
-   - Wrong DNS can look like a “network change” incident.
+- **Commands:** `sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter`; `ip rule`; `ip route get` both directions.
+- **Symptoms:** SYN arrives (tcpdump) but replies dropped; intermittent one-way paths.
+- **Fix direction:** Adjust routing symmetry or rp_filter carefully in staging.
 
-8. **Additional hypotheses (not only Docker∩LAN)**
-   - `rp_filter=1` + asymmetric routing dropping return traffic.
-   - MTU / PMTUD blackhole (large responses fail; try smaller MSS or check ICMP fragmentation-needed).
-   - Conntrack table full / stale entries (`conntrack -L` / dmesg).
-   - UFW `DEFAULT_FORWARD_POLICY=DROP` without `ufw route` / DOCKER-USER allowances.
-   - `iptables-nft` vs legacy mismatch after mixed tooling.
+### C. MTU / PMTUD blackhole
+
+- **Commands:** `ip link`; `ping -M do -s 1472 TARGET`; check ICMP fragmentation-needed filtered.
+- **Symptoms:** Small HTTP works; large responses hang; TLS handshake stalls after ClientHello.
+- **Fix direction:** Clamp MSS / fix ICMP path / correct tunnel MTU.
+
+### D. Conntrack exhaustion / stale state
+
+- **Commands:** `conntrack -L | wc -l` (if available); `dmesg | grep -i conntrack`; `sysctl net.netfilter.nf_conntrack_count`.
+- **Symptoms:** New connections fail under load; old sessions misbehave after NAT change.
+- **Fix direction:** Raise table size / flush specific entries; fix NAT churn.
+
+### E. UFW forward / missing `ufw route` / DOCKER-USER
+
+- **Commands:** `grep DEFAULT_FORWARD_POLICY /etc/default/ufw`; `ufw status verbose`; `iptables -S DOCKER-USER`.
+- **Symptoms:** Host curl OK; remote timeout; FORWARD DROP counters climb.
+- **Fix direction:** Persist DOCKER-USER allows (role `host_hardening`); avoid mass rule deletes.
+
+### F. iptables-nft vs legacy
+
+- **Commands:** `iptables -V`; `nft list ruleset | sed -n '1,80p'`; confirm only one tooling path.
+- **Symptoms:** Rules “applied” but invisible to the active backend; confusing duplicates.
+- **Fix direction:** Standardize on nft or legacy; re-apply via IaC.
 
 ## Safe production network changes
 
-- Capture baseline (`ip addr`, `ip route`, `iptables-save` / nft, Docker daemon.json).
-- Change in staging first; ship via IaC.
-- Keep console/out-of-band access.
-- Change one control at a time; verify from a second host; keep rollback ready.
-- Helper (read-only): `bash scripts/network-diagnostics.sh`
+- Capture baseline; change in staging; one control at a time; OOB access; rollback ready.

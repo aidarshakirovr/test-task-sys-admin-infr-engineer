@@ -4,7 +4,8 @@ services:
     container_name: web-service-prod
     restart: unless-stopped
     ports:
-      - "0.0.0.0:8080:80"
+      # Lab default binds localhost; override via .env APP_PUBLISH_IP / APP_PUBLISH_PORT
+      - "${APP_PUBLISH_IP:-127.0.0.1}:${APP_PUBLISH_PORT:-8080}:80"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
       interval: 15s
