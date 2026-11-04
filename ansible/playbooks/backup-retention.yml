@@ -10,7 +10,8 @@
   hosts: backup_admin
   become: true
   vars:
-    restic_repo_path: "{{ restic_secondary_repo_path | default(restic_repo_path) }}"
+    # Prefer secondary (offsite) repo; fall back to primary without self-reference.
+    retention_repo: "{{ restic_secondary_repo_path | default(restic_primary_repo_path | default(restic_local_repo_path), true) }}"
   tasks:
     - name: Require restic password
       ansible.builtin.assert:
@@ -19,13 +20,20 @@
         fail_msg: "Provide vault_restic_password for retention runs."
       no_log: true
 
+    - name: Require retention repository path
+      ansible.builtin.assert:
+        that:
+          - retention_repo is string
+          - retention_repo | length > 0
+        fail_msg: "Set restic_secondary_repo_path or restic_primary_repo_path / restic_local_repo_path."
+
     - name: Apply forget and prune
       ansible.builtin.command:
         argv:
           - restic
           - forget
           - --repo
-          - "{{ restic_repo_path }}"
+          - "{{ retention_repo }}"
           - --password-file
           - "{{ restic_password_file }}"
           - --keep-hourly

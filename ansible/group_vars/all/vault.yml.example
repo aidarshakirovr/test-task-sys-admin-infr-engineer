@@ -2,6 +2,6 @@
 # Copy to vault.yml and encrypt:
 #   cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
 #   ansible-vault encrypt ansible/group_vars/all/vault.yml
-vault_restic_password: "ChangeMeToALongRandomSecret"
+vault_restic_password: "REPLACE_ME_VIA_ANSIBLE_VAULT"
 vault_s3_access_key: ""
 vault_s3_secret_key: ""

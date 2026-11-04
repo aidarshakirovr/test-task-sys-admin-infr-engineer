@@ -5,16 +5,64 @@
     state: present
     update_cache: true
 
-- name: Configure SSH hardening
+- name: Resolve deploy user home for authorized_keys check
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ hardening_ssh_deploy_user }}"
+  register: hardening_deploy_passwd
+  failed_when: false
+
+- name: Stat deploy user authorized_keys
+  ansible.builtin.stat:
+    path: "{{ hardening_deploy_passwd.ansible_facts.getent_passwd[hardening_ssh_deploy_user][4] }}/.ssh/authorized_keys"
+  register: hardening_authorized_keys
+  when:
+    - hardening_deploy_passwd.ansible_facts.getent_passwd is defined
+    - hardening_ssh_deploy_user in hardening_deploy_passwd.ansible_facts.getent_passwd
+
+- name: Decide whether password authentication may be disabled
+  ansible.builtin.set_fact:
+    hardening_disable_password_auth: "{{ (hardening_ssh_password_authentication | string) == 'no' and (hardening_authorized_keys is defined) and (hardening_authorized_keys.stat is defined) and (hardening_authorized_keys.stat.exists | default(false)) and ((hardening_authorized_keys.stat.size | default(0)) | int > 0) }}"
+
+- name: Warn when PasswordAuthentication cannot be disabled safely
+  ansible.builtin.debug:
+    msg: >-
+      Skipping PasswordAuthentication=no: no non-empty authorized_keys for
+      {{ hardening_ssh_deploy_user }}. Fix keys first to avoid lockout.
+  when:
+    - (hardening_ssh_password_authentication | string) == 'no'
+    - not (hardening_disable_password_auth | bool)
+
+- name: Harden PermitRootLogin and PubkeyAuthentication
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: "{{ item.regexp }}"
     line: "{{ item.line }}"
     backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
   loop:
     - { regexp: '^#?PermitRootLogin\b', line: "PermitRootLogin {{ hardening_ssh_permit_root_login }}" }
-    - { regexp: '^#?PasswordAuthentication\b', line: "PasswordAuthentication {{ hardening_ssh_password_authentication }}" }
     - { regexp: '^#?PubkeyAuthentication\b', line: "PubkeyAuthentication {{ hardening_ssh_pubkey_authentication }}" }
+  notify: Restart ssh
+
+- name: Disable PasswordAuthentication only when authorized_keys exist
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication\b'
+    line: "PasswordAuthentication no"
+    backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
+  when: hardening_disable_password_auth | bool
+  notify: Restart ssh
+
+- name: Leave PasswordAuthentication enabled when no deploy key is present
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication\b'
+    line: "PasswordAuthentication yes"
+    backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
+  when: not (hardening_disable_password_auth | bool)
   notify: Restart ssh
 
 - name: Allow required UFW ports before enable
@@ -47,6 +95,8 @@
     group: root
     mode: "0755"
 
+# NOTE: handler restarts Docker and stops containers — maintenance window required.
+# default-address-pools only affect NEW networks; recreate overlapping ones manually.
 - name: Deploy Docker daemon.json with non-colliding address pools
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json

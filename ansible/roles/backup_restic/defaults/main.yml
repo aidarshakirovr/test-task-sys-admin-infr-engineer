@@ -13,6 +13,8 @@ s3_endpoint: "s3.amazonaws.com"
 s3_bucket: "company-infrastructure-backups"
 restic_s3_repo_path: "s3:{{ s3_endpoint }}/{{ s3_bucket }}"
 restic_repo_path: "{{ restic_s3_repo_path if restic_backend == 's3' else restic_local_repo_path }}"
+# Alias for retention playbook (never use restic_repo_path | default(restic_repo_path)).
+restic_primary_repo_path: "{{ restic_repo_path }}"
 
 # Optional second repository for offsite copy after each backup (restic copy).
 # Prefer a bucket/key without DeleteObject; prune runs only from an admin host.

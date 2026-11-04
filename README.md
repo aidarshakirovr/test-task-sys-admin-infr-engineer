@@ -13,6 +13,9 @@
 | `scripts/network-diagnostics.sh` | Read-only network / Docker / firewall snapshot |
 | `docs/DISASTER_RECOVERY.md` | Restore + DR plan, consistency, RTO hypothesis |
 | `docs/NETWORK_INCIDENT_RUNBOOK.md` | Ordered production network incident checks |
+| `docs/NETWORK_INCIDENT_CASE.md` | Task 2 root cause: Docker subnet vs LAN |
+| `docs/examples/dr-restore-test.sample.log` | SAMPLE DR test fixture (not production) |
+| `.github/workflows/validate.yml` | CI: galaxy, syntax-check, ansible-lint, shellcheck |
 | `docker/compose.yaml` | Example published web service |
 
 ## Backup and recovery
@@ -42,24 +45,32 @@ bash scripts/network-diagnostics.sh
 ```
 
 Ordered incident runbook: `docs/NETWORK_INCIDENT_RUNBOOK.md`  
+Case write-up (Docker subnet overlap): `docs/NETWORK_INCIDENT_CASE.md`  
 (client `curl`/`nc` → `ss` → `docker port` → UFW/`DOCKER-USER`/FORWARD/NAT with counters → `ip route get` / Docker overlap → `tcpdump` → DNS). Do not delete firewall rules blindly.
+
+Docker `daemon.json` changes restart the daemon (containers stop — maintenance window). `default-address-pools` apply only to **new** networks; recreate overlapping ones manually.
 
 ## What was verified vs not
 
 | Item | Status |
 |------|--------|
-| Role templates / scripts syntax intent | Present in repo; run `bash -n` / `ansible-playbook --syntax-check` locally |
-| Ansible `--check` on disposable staging VM | **Not claimed** until you run it |
+| CI syntax-check / ansible-lint / shellcheck | Covered by `.github/workflows/validate.yml` |
+| Local `bash -n` / syntax-check | Run commands below (or rely on CI) |
+| Ansible `--check` on disposable staging VM | **Not run here** — no staging VM in this workspace; run before prod |
 | Live S3 Object Lock / append-only rest-server | **Must be configured and tested outside defaults** |
 | Full 100 GB restore timing (RTO) | **Not measured** — hypothesis only |
-| Sample DR script against real data | **Not claimed** until executed on a host with a real repo |
+| Sample DR log | `docs/examples/dr-restore-test.sample.log` is a **SAMPLE fixture**, not a live host capture |
 
 ## Validation
 
 ```bash
 ansible-galaxy collection install -r ansible/requirements.yml
 ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/site.yml --syntax-check
+ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/playbooks/backup-retention.yml --syntax-check
 bash -n scripts/network-diagnostics.sh scripts/dr-restore-test.sh
+# optional if installed:
+# ansible-lint ansible/site.yml ansible/playbooks/backup-retention.yml
+# shellcheck scripts/*.sh
 ```
 
-Run Ansible `--check --diff` against a disposable staging VM before production. Do not run the DR test until the repository and password file already exist.
+Run Ansible `--check --diff` against a disposable staging VM before production (not available in this workspace). Do not run the DR test until the repository and password file already exist.

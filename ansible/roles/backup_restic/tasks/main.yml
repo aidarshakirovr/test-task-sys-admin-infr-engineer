@@ -82,7 +82,7 @@
   no_log: true
   when: restic_backend == "s3" or (restic_copy_enabled | bool and restic_secondary_backend == "s3")
 
-- name: Check if primary restic repository is already initialized
+- name: Probe primary restic repository
   ansible.builtin.command:
     argv:
       - restic
@@ -101,7 +101,20 @@
   failed_when: false
   no_log: true
 
-- name: Initialize primary restic repository if not present
+- name: Classify primary repository probe result
+  ansible.builtin.set_fact:
+    restic_primary_missing: "{{ restic_repo_probe.rc != 0 and ((restic_repo_probe.stderr | default('') ~ ' ' ~ restic_repo_probe.stdout | default('')) is search('Is not a restic repository|does not exist|config file does not exist|unable to open config file|no such file or directory', ignorecase=True)) }}"
+
+- name: Fail when primary repo probe failed for non-missing reasons
+  ansible.builtin.fail:
+    msg: >-
+      Primary restic repository probe failed (auth, network, or other error).
+      Refusing to run restic init. Fix credentials/connectivity, then re-run.
+  when:
+    - restic_repo_probe.rc != 0
+    - not (restic_primary_missing | bool)
+
+- name: Initialize primary restic repository only if missing
   ansible.builtin.command:
     argv:
       - restic
@@ -115,10 +128,10 @@
   environment: "{{ restic_s3_environment }}"
   become: true
   become_user: "{{ restic_user }}"
-  when: restic_repo_probe.rc != 0
+  when: restic_primary_missing | bool
   no_log: true
 
-- name: Check if secondary restic repository is already initialized
+- name: Probe secondary restic repository
   ansible.builtin.command:
     argv:
       - restic
@@ -138,7 +151,23 @@
   no_log: true
   when: restic_copy_enabled | bool
 
-- name: Initialize secondary restic repository if not present
+- name: Classify secondary repository probe result
+  ansible.builtin.set_fact:
+    restic_secondary_missing: "{{ restic_secondary_probe.rc != 0 and ((restic_secondary_probe.stderr | default('') ~ ' ' ~ restic_secondary_probe.stdout | default('')) is search('Is not a restic repository|does not exist|config file does not exist|unable to open config file|no such file or directory', ignorecase=True)) }}"
+  when: restic_copy_enabled | bool
+
+- name: Fail when secondary repo probe failed for non-missing reasons
+  ansible.builtin.fail:
+    msg: >-
+      Secondary restic repository probe failed (auth, network, or other error).
+      Refusing to run restic init on the secondary repo.
+  when:
+    - restic_copy_enabled | bool
+    - restic_secondary_probe.rc is defined
+    - restic_secondary_probe.rc != 0
+    - not (restic_secondary_missing | bool)
+
+- name: Initialize secondary restic repository only if missing
   ansible.builtin.command:
     argv:
       - restic
@@ -154,7 +183,7 @@
   become_user: "{{ restic_user }}"
   when:
     - restic_copy_enabled | bool
-    - restic_secondary_probe.rc != 0
+    - restic_secondary_missing | default(false) | bool
   no_log: true
 
 - name: Deploy backup script

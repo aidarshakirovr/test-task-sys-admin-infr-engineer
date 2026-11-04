@@ -61,7 +61,7 @@ fi
 if ((${#DOCKER[@]})); then
   "${DOCKER[@]}" ps --format 'table {{.Names}}\t{{.Ports}}' || true
   host_routes="$( { ip -o -4 route show 2>/dev/null; ip -o -6 route show 2>/dev/null; } |
-    awk '$1 ~ /\\// {print $1}' | sort -u | tr '\n' ' ')"
+    awk '$1 ~ /\// {print $1}' | sort -u | tr '\n' ' ')"
 
   while IFS= read -r net_id; do
     [[ -n "$net_id" ]] || continue

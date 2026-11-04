@@ -1,0 +1,41 @@
+# SAMPLE ONLY — synthetic fixture for reviewers / CI docs.
+# Not captured from a production host. Do not treat timings as measured RTO.
+
+=== 0. Timing start: 2026-11-04T18:10:12+03:00 ===
+=== 1. Repository snapshot availability ===
+repository is already locked by PID 0 on sample-host by sample (UID 0)
+ID        Time                 Host        Tags        Paths
+---------------------------------------------------------------
+a1b2c3d4  2026-11-04 18:09:39  app-01      app-data    /srv/app/data
+---------------------------------------------------------------
+1 snapshots
+
+=== 2. Repository integrity check (10% data subset) ===
+using temporary cache in /tmp/restic-check-cache
+create exclusive lock for repository
+load indexes
+check all packs
+check snapshots, trees and blobs
+[0:12] 100.00%  64 / 64 packs read
+no errors were found
+
+=== 3. Select up to 20 RANDOM existing files ===
+selected 20 files under /srv/app/data
+
+=== 4. Restore selected files into an isolated temporary directory ===
+restoring <Snapshot a1b2c3d4 of [/srv/app/data] at 2026-11-04 18:09:39> to /var/tmp/restic-dr-verify.SAMPLE
+
+=== 5. Compare SHA-256 checksums ===
+[OK] config/app.yaml
+[OK] state/queue/item-17.json
+[OK] blobs/f3/a9c1.bin
+[OK] blobs/0e/77d2.bin
+[OK] logs/rotated/app.log.3
+... (15 more OK lines omitted in sample) ...
+[OK] meta/version
+
+=== 6. Optional application smoke test ===
+curl -fsS http://127.0.0.1:8080/ >/dev/null
+
+[SUCCESS] DR sample restore passed (20 files) in 47s.
+[INFO] This is not a full 100GB restore timing; record a quarterly full restore separately.
