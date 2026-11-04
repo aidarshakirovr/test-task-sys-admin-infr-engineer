@@ -1,0 +1,8 @@
+---
+# Production: keep an offsite copy after every backup.
+restic_copy_enabled: true
+restic_backend: "local"
+restic_secondary_backend: "s3"
+restic_secondary_repo_path: "s3:{{ s3_endpoint }}/{{ s3_bucket }}-offsite"
+
+# App-host S3 key must be write/list only (no DeleteObject). Prune stays on backup_admin.

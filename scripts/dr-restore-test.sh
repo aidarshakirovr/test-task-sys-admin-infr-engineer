@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 # Read-only verification of an EXISTING Restic repository (local or remote).
 # Does not initialize repositories, create source files, or restore over production data.
+# File selection and checksums come from the snapshot (restic ls / restic dump),
+# not from the live source tree — avoids false failures when data changed after backup.
 
 REPO_PATH="${RESTIC_REPOSITORY:-/var/backups/restic-repo}"
 PASS_FILE="${RESTIC_PASSWORD_FILE:-/etc/restic/backup.pass}"
@@ -10,13 +12,13 @@ SOURCE_DIR="${BACKUP_SOURCE_DIR:-/srv/app/data}"
 SAMPLE_FILES="${DR_SAMPLE_FILES:-20}"
 RESTORE_BASE="${DR_RESTORE_BASE:-/var/tmp}"
 SMOKE_CMD="${DR_SMOKE_CMD:-}"
+SNAPSHOT_ID="${DR_SNAPSHOT:-latest}"
 
 fail() { echo "[ERROR] $*" >&2; exit 1; }
 
 command -v restic >/dev/null 2>&1 || fail "restic is not installed"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is not installed"
 command -v python3 >/dev/null 2>&1 || fail "python3 is not installed"
-[[ -d "$SOURCE_DIR" ]] || fail "Source directory does not exist: $SOURCE_DIR"
 [[ -f "$PASS_FILE" ]] || fail "Password file does not exist: $PASS_FILE"
 [[ -r "$PASS_FILE" ]] || fail "Password file is not readable: $PASS_FILE"
 [[ "$SAMPLE_FILES" =~ ^[1-9][0-9]*$ ]] || fail "DR_SAMPLE_FILES must be a positive integer"
@@ -42,19 +44,34 @@ restic snapshots --latest 1
 echo "=== 2. Repository integrity check (10% data subset) ==="
 restic check --read-data-subset=10%
 
-echo "=== 3. Select up to ${SAMPLE_FILES} RANDOM existing files ==="
+echo "=== 3. Select up to ${SAMPLE_FILES} RANDOM files from snapshot ${SNAPSHOT_ID} ==="
 mapfile -d '' -t SELECTED_FILES < <(
-  find "$SOURCE_DIR" -type f -print0 | python3 -c '
-import random, sys
+  restic ls --json "${SNAPSHOT_ID}" |
+    python3 -c '
+import json, random, sys
 n = int(sys.argv[1])
-files = [f for f in sys.stdin.buffer.read().split(b"\0") if f]
-random.shuffle(files)
-chosen = files[:n]
+prefix = sys.argv[2].rstrip("/")
+paths = []
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if obj.get("type") != "file":
+        continue
+    path = obj.get("path") or ""
+    if path == prefix or path.startswith(prefix + "/"):
+        paths.append(path)
+random.shuffle(paths)
+chosen = paths[:n]
 if chosen:
-    sys.stdout.buffer.write(b"\0".join(chosen) + b"\0")
-' "$SAMPLE_FILES"
+    sys.stdout.buffer.write(b"\0".join(p.encode() for p in chosen) + b"\0")
+' "$SAMPLE_FILES" "$SOURCE_DIR"
 )
-((${#SELECTED_FILES[@]} > 0)) || fail "No regular files found under $SOURCE_DIR"
+((${#SELECTED_FILES[@]} > 0)) || fail "No regular files under ${SOURCE_DIR} in snapshot ${SNAPSHOT_ID}"
 
 INCLUDE_ARGS=()
 for file in "${SELECTED_FILES[@]}"; do
@@ -62,20 +79,16 @@ for file in "${SELECTED_FILES[@]}"; do
 done
 
 echo "=== 4. Restore selected files into an isolated temporary directory ==="
-restic restore latest --target "$RESTORE_TARGET" "${INCLUDE_ARGS[@]}"
+restic restore "${SNAPSHOT_ID}" --target "$RESTORE_TARGET" "${INCLUDE_ARGS[@]}"
 
-echo "=== 5. Compare SHA-256 checksums ==="
-RESTORED_SOURCE="${RESTORE_TARGET}${SOURCE_DIR}"
-[[ -d "$RESTORED_SOURCE" ]] || fail "Expected restored path not found: $RESTORED_SOURCE"
-
+echo "=== 5. Compare SHA-256 of restored files vs restic dump (snapshot truth) ==="
 for original in "${SELECTED_FILES[@]}"; do
-  relative="${original#"$SOURCE_DIR"/}"
-  restored="${RESTORED_SOURCE}/${relative}"
-  [[ -f "$restored" ]] || fail "Missing restored file: $relative"
-  original_hash="$(sha256sum -- "$original" | awk '{print $1}')"
+  restored="${RESTORE_TARGET}${original}"
+  [[ -f "$restored" ]] || fail "Missing restored file: $original"
   restored_hash="$(sha256sum -- "$restored" | awk '{print $1}')"
-  [[ "$original_hash" == "$restored_hash" ]] || fail "Checksum mismatch: $relative"
-  printf '[OK] %s\n' "$relative"
+  dump_hash="$(restic dump "${SNAPSHOT_ID}" "$original" | sha256sum | awk '{print $1}')"
+  [[ "$restored_hash" == "$dump_hash" ]] || fail "Checksum mismatch vs snapshot dump: $original"
+  printf '[OK] %s\n' "$original"
 done
 
 if [[ -n "$SMOKE_CMD" ]]; then

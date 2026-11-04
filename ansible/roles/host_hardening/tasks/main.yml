@@ -87,6 +87,27 @@
     policy: allow
   when: hardening_ufw_enabled | bool
 
+# UFW FORWARD policy alone often blocks published container ports; use DOCKER-USER.
+- name: Allow established/related traffic in DOCKER-USER
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ctstate: ESTABLISHED,RELATED
+    jump: ACCEPT
+    action: insert
+    rule_num: 1
+  when: hardening_docker_user_rules | bool
+
+- name: Allow published TCP ports through DOCKER-USER
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    protocol: "{{ item.proto }}"
+    destination_port: "{{ item.port }}"
+    jump: ACCEPT
+    action: insert
+    rule_num: 2
+  loop: "{{ hardening_ufw_allow | selectattr('proto', 'equalto', 'tcp') | list }}"
+  when: hardening_docker_user_rules | bool
+
 - name: Ensure Docker config directory exists
   ansible.builtin.file:
     path: /etc/docker

@@ -11,6 +11,10 @@ hardening_ufw_allow:
   - { port: "22", proto: "tcp", comment: "SSH" }
   - { port: "8080", proto: "tcp", comment: "app published port" }
 
+# UFW does not manage Docker bridge forwarding; allow published ports in DOCKER-USER.
+hardening_docker_user_rules: true
+
+
 # Restarting Docker (handler) stops running containers — schedule a maintenance window.
 # default-address-pools applies only to NEW networks; recreate overlapping ones manually.
 hardening_docker_restart_note: >-

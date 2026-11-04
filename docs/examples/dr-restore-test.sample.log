@@ -19,20 +19,20 @@ check snapshots, trees and blobs
 [0:12] 100.00%  64 / 64 packs read
 no errors were found
 
-=== 3. Select up to 20 RANDOM existing files ===
-selected 20 files under /srv/app/data
+=== 3. Select up to 20 RANDOM files from snapshot latest ===
+selected 20 paths from restic ls (not from live disk)
 
 === 4. Restore selected files into an isolated temporary directory ===
 restoring <Snapshot a1b2c3d4 of [/srv/app/data] at 2026-11-04 18:09:39> to /var/tmp/restic-dr-verify.SAMPLE
 
-=== 5. Compare SHA-256 checksums ===
-[OK] config/app.yaml
-[OK] state/queue/item-17.json
-[OK] blobs/f3/a9c1.bin
-[OK] blobs/0e/77d2.bin
-[OK] logs/rotated/app.log.3
+=== 5. Compare SHA-256 of restored files vs restic dump (snapshot truth) ===
+[OK] /srv/app/data/config/app.yaml
+[OK] /srv/app/data/state/queue/item-17.json
+[OK] /srv/app/data/blobs/f3/a9c1.bin
+[OK] /srv/app/data/blobs/0e/77d2.bin
+[OK] /srv/app/data/logs/rotated/app.log.3
 ... (15 more OK lines omitted in sample) ...
-[OK] meta/version
+[OK] /srv/app/data/meta/version
 
 === 6. Optional application smoke test ===
 curl -fsS http://127.0.0.1:8080/ >/dev/null
