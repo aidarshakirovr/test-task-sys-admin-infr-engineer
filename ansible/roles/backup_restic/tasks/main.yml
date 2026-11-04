@@ -3,7 +3,7 @@
   ansible.builtin.assert:
     that:
       - restic_password | length > 0
-    fail_msg: "CRITICAL: restic_password must be passed via Vault or -e 'restic_password=...'"
+    fail_msg: "CRITICAL: restic_password must be passed via Ansible Vault"
 
 - name: Install required packages
   ansible.builtin.apt:
@@ -50,11 +50,10 @@
     group: "{{ restic_group }}"
     mode: '0750'
 
-- name: Ensure backup source directory exists
+- name: Ensure backup source directory exists without overriding mode
   ansible.builtin.file:
     path: "{{ backup_source_dir }}"
     state: directory
-    mode: '0755'
 
 - name: Apply POSIX ACL (rX) on source directory for restic user
   ansible.posix.acl:
