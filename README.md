@@ -1,16 +1,33 @@
-# Infrastructure & SysAdmin Engineering Solution
+# Systems Administrator / Infrastructure Engineer — Test Task
 
-## 1. Backup & Disaster Recovery (Task 1)
-- **3-2-1 Architecture:** Restic (AES-256) with local repo (/var/backups/restic-repo) and S3/MinIO support in Ansible.
-- **Security & Ransomware Protection:** restic-backup user (nologin), POSIX ACL (rX), systemd sandbox (ProtectSystem=strict), S3 Object Lock (WORM) & Append-Only mode.
-- **Metrics (100 GB):** systemd.timer every 4h (RPO <= 4h, RTO <= 30m), GFS retention: 24h / 14d / 8w / 6m.
-- **Runbooks & DR Tests:** Detailed in [docs/DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md) and verified via scripts/dr-restore-test.sh (SHA-256 check).
+## Backup and recovery
 
-## 2. Production Network Incident & Diagnostics (Task 2)
-- **Root Cause & Fix:** Container bound to 127.0.0.1:8080 instead of 0.0.0.0:8080:80; verified via compose healthcheck.
-- **Automated Audit:** scripts/network-diagnostics.sh checks sockets (ss), routing (ip route/rule), ip_forward, UFW, DOCKER-USER / FORWARD / NAT chains, DNS, and Docker subnet overlaps via Python ipaddress.
-- **Safe Change Management:** Staging verification, IaC, iptables-save backup, and sudo netplan try --timeout 120.
+The project uses Restic for encrypted, deduplicated backups. The role supports a local repository and an S3-compatible repository. Configure secrets with Ansible Vault; the defaults intentionally do not contain a usable password.
 
-## 3. Verification
-- bash scripts/network-diagnostics.sh
-- sudo bash scripts/dr-restore-test.sh
+The intended backup interval is four hours (target RPO <= 4 hours), provided the deployed systemd timer consumes `restic_schedule` and successful runs are monitored. The RTO is not asserted as achieved until a full restore is timed.
+
+A local repository on the source host is not ransomware-resistant. S3 Object Lock or an append-only backup server must be configured independently and verified before claiming immutable backup protection.
+
+See `docs/DISASTER_RECOVERY.md` for restore procedures and DR verification.
+
+## Network diagnostics
+
+Run:
+
+```bash
+bash scripts/network-diagnostics.sh
+```
+
+The script reports listening sockets, routes, forwarding, firewall/NAT state, DNS, Docker published ports, and possible Docker subnet overlaps. It does not modify firewall or network configuration.
+
+For an external reachability incident, also test from a second machine with `curl`/`nc` and capture packets with `tcpdump`.
+
+## Validation
+
+```bash
+ansible-galaxy collection install -r ansible/requirements.yml
+ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/site.yml --syntax-check
+bash -n scripts/network-diagnostics.sh scripts/dr-restore-test.sh
+```
+
+Run Ansible `--check` against a disposable staging VM before production. Do not run the DR test until the repository and password file already exist.

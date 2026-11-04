@@ -22,16 +22,19 @@ restic backup \
     --repo "${RESTIC_REPOSITORY}" \
     --password-file "${RESTIC_PASSWORD_FILE}" \
     --tag "app-data" \
+{% for exclude in restic_excludes %}
+    --exclude "{{ exclude }}" \
+{% endfor %}
     "${BACKUP_SOURCE}"
 
 echo "[INFO] Applying retention policy..."
 restic forget \
     --repo "${RESTIC_REPOSITORY}" \
     --password-file "${RESTIC_PASSWORD_FILE}" \
-    --keep-hourly 24 \
-    --keep-daily 14 \
-    --keep-weekly 4 \
-    --keep-monthly 6 \
+    --keep-hourly {{ restic_keep_hourly }} \
+    --keep-daily {{ restic_keep_daily }} \
+    --keep-weekly {{ restic_keep_weekly }} \
+    --keep-monthly {{ restic_keep_monthly }} \
     --prune
 
 echo "[INFO] Backup completed successfully."

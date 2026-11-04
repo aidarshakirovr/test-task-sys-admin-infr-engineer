@@ -1,54 +1,65 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Read-only verification of an EXISTING Restic repository.
+# Does not initialize repositories, create source files, or restore over production data.
+
 REPO_PATH="${RESTIC_REPOSITORY:-/var/backups/restic-repo}"
 PASS_FILE="${RESTIC_PASSWORD_FILE:-/etc/restic/backup.pass}"
 SOURCE_DIR="${BACKUP_SOURCE_DIR:-/srv/app/data}"
-RESTORE_TARGET="/tmp/dr-verify-$$"
+SAMPLE_FILES="${DR_SAMPLE_FILES:-20}"
+RESTORE_BASE="${DR_RESTORE_BASE:-/var/tmp}"
 
-cleanup() {
-    rm -rf "${RESTORE_TARGET}"
-}
+fail() { echo "[ERROR] $*" >&2; exit 1; }
+
+command -v restic >/dev/null 2>&1 || fail "restic is not installed"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is not installed"
+command -v python3 >/dev/null 2>&1 || fail "python3 is not installed"
+[[ -d "$SOURCE_DIR" ]] || fail "Source directory does not exist: $SOURCE_DIR"
+[[ -f "$PASS_FILE" ]] || fail "Password file does not exist: $PASS_FILE"
+[[ -r "$PASS_FILE" ]] || fail "Password file is not readable: $PASS_FILE"
+[[ -d "$REPO_PATH" && -f "$REPO_PATH/config" ]] || fail "Existing local repository not found: $REPO_PATH"
+[[ "$SAMPLE_FILES" =~ ^[1-9][0-9]*$ ]] || fail "DR_SAMPLE_FILES must be a positive integer"
+
+export RESTIC_REPOSITORY="$REPO_PATH"
+export RESTIC_PASSWORD_FILE="$PASS_FILE"
+
+RESTORE_TARGET="$(mktemp -d "${RESTORE_BASE%/}/restic-dr-verify.XXXXXX")"
+cleanup() { rm -rf -- "$RESTORE_TARGET"; }
 trap cleanup EXIT
 
-echo "=== [DR-TEST] 1. Проверка окружения и тестовых данных ==="
-mkdir -p "${SOURCE_DIR}" "$(dirname "${PASS_FILE}")" "$(dirname "${REPO_PATH}")"
-if [[ ! -f "${PASS_FILE}" ]]; then
-    echo "temporary-dr-test-pass" > "${PASS_FILE}"
-    chmod 0600 "${PASS_FILE}"
-fi
+echo "=== 1. Repository snapshot availability ==="
+restic snapshots --latest 1
 
-if [[ ! -f "${SOURCE_DIR}/dr_probe.txt" ]]; then
-    echo "DR Verification Probe Data - $(date)" > "${SOURCE_DIR}/dr_probe.txt"
-fi
+echo "=== 2. Repository integrity check (10% data subset) ==="
+restic check --read-data-subset=10%
 
-if [[ ! -f "${REPO_PATH}/config" ]]; then
-    echo "[INFO] Инициализация локального репозитория Restic..."
-    restic -r "${REPO_PATH}" --password-file "${PASS_FILE}" init
-fi
+echo "=== 3. Select up to ${SAMPLE_FILES} existing files for restore verification ==="
+mapfile -d '' -t SELECTED_FILES < <(
+  find "$SOURCE_DIR" -type f -print0 | sort -z | head -z -n "$SAMPLE_FILES"
+)
+((${#SELECTED_FILES[@]} > 0)) || fail "No regular files found under $SOURCE_DIR"
 
-restic -r "${REPO_PATH}" --password-file "${PASS_FILE}" backup "${SOURCE_DIR}" --quiet
+INCLUDE_ARGS=()
+for file in "${SELECTED_FILES[@]}"; do
+  INCLUDE_ARGS+=(--include "$file")
+done
 
-echo "=== [DR-TEST] 2. Проверка целостности репозитория (restic check) ==="
-restic -r "${REPO_PATH}" --password-file "${PASS_FILE}" check --read-data-subset=10%
+echo "=== 4. Restore selected files into an isolated temporary directory ==="
+restic restore latest --target "$RESTORE_TARGET" "${INCLUDE_ARGS[@]}"
 
-echo "=== [DR-TEST] 3. Тестовое восстановление последнего снапшота в ${RESTORE_TARGET} ==="
-mkdir -p "${RESTORE_TARGET}"
-restic -r "${REPO_PATH}" --password-file "${PASS_FILE}" restore latest --target "${RESTORE_TARGET}"
+echo "=== 5. Compare SHA-256 checksums ==="
+RESTORED_SOURCE="${RESTORE_TARGET}${SOURCE_DIR}"
+[[ -d "$RESTORED_SOURCE" ]] || fail "Expected restored path not found: $RESTORED_SOURCE"
 
-echo "=== [DR-TEST] 4. Побайтовая сверка контрольных сумм SHA-256 ==="
-# Сверяем строго файлы внутри восстановленной структуры исходного каталога
-RESTORED_PATH="${RESTORE_TARGET}${SOURCE_DIR}"
+for original in "${SELECTED_FILES[@]}"; do
+  relative="${original#"$SOURCE_DIR"/}"
+  restored="${RESTORED_SOURCE}/${relative}"
+  [[ -f "$restored" ]] || fail "Missing restored file: $relative"
+  original_hash="$(sha256sum -- "$original" | awk '{print $1}')"
+  restored_hash="$(sha256sum -- "$restored" | awk '{print $1}')"
+  [[ "$original_hash" == "$restored_hash" ]] || fail "Checksum mismatch: $relative"
+  printf '[OK] %s\n' "$relative"
+done
 
-ORIG_SUM=$(find "${SOURCE_DIR}" -type f -exec sha256sum {} + | sort | sha256sum | awk '{print $1}')
-REST_SUM=$(find "${RESTORED_PATH}" -type f -exec sha256sum {} + | sort | sha256sum | awk '{print $1}')
-
-echo "Хэш исходных данных:       ${ORIG_SUM}"
-echo "Хэш восстановленных данных: ${REST_SUM}"
-
-if [[ "${ORIG_SUM}" == "${REST_SUM}" ]]; then
-    echo "[SUCCESS] DR-тест успешно пройден: 100% совпадение контрольных сумм SHA-256."
-else
-    echo "[ERROR] Нарушение целостности данных при восстановлении!"
-    exit 1
-fi
+echo "[SUCCESS] DR sample restore passed (${#SELECTED_FILES[@]} files). Temporary data will be removed."

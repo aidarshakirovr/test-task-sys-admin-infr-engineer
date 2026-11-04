@@ -1,60 +1,106 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-echo "=== 1. Прослушиваемые сокеты (L4) и IP Forwarding ==="
-ss -tulpn | grep -E '8080|docker|LISTEN' || true
-sysctl net.ipv4.ip_forward || true
+section() { printf '\n=== %s ===\n' "$1"; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
-echo -e "\n=== 2. Таблица маршрутизации и Policy Routing (L3) ==="
-ip -br addr show
-ip route show
-ip rule show
-
-echo -e "\n=== 3. Firewall и Netfilter (UFW / iptables / NAT) ==="
-if command -v ufw &>/dev/null; then
-    sudo ufw status verbose || true
-fi
-sudo iptables -S DOCKER-USER 2>/dev/null || true
-sudo iptables -L FORWARD -n -v --line-numbers 2>/dev/null | sed -n '1,15p' || true
-sudo iptables -t nat -L DOCKER -n -v --line-numbers 2>/dev/null || true
-
-echo -e "\n=== 4. DNS-диагностика ==="
-if getent hosts localhost >/dev/null; then
-    echo "[OK] Локальный резолвинг (NSS/hosts) работает корректно"
+section "1. Listening sockets and forwarding"
+if have ss; then
+  ss -tulpn || true
 else
-    echo "[WARN] Сбой локального резолвинга"
+  echo "[WARN] ss is not installed"
 fi
-resolvectl status 2>/dev/null | sed -n '1,12p' || cat /etc/resolv.conf || true
-
-echo -e "\n=== 5. Анализ коллизий подсетей (Python ipaddress) ==="
-HOST_ROUTES=$(ip route | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+/ {print $1}' | tr '\n' ' ')
-echo "Маршруты хоста: ${HOST_ROUTES:-не обнаружены}"
-
-DOCKER_CMD="docker"
-if ! docker ps &>/dev/null && command -v sudo &>/dev/null; then
-    DOCKER_CMD="sudo docker"
+if have sysctl; then
+  sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding 2>/dev/null || true
 fi
 
-if command -v docker &>/dev/null && $DOCKER_CMD ps &>/dev/null; then
-    echo "Проверка подсетей Docker:"
-    for net_id in $($DOCKER_CMD network ls -q 2>/dev/null); do
-        SUBNET=$($DOCKER_CMD network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
-        NAME=$($DOCKER_CMD network inspect "$net_id" --format '{{.Name}}' 2>/dev/null || true)
-        if [[ -n "$SUBNET" ]]; then
-            echo "  - Сеть Docker: ${NAME} (${SUBNET})"
-            python3 -c "
-import ipaddress, sys
-d = ipaddress.ip_network(sys.argv[1], strict=False)
+section "2. Addresses and routing"
+ip -br addr show 2>/dev/null || true
+ip -4 route show 2>/dev/null || true
+ip -6 route show 2>/dev/null || true
+ip rule show 2>/dev/null || true
+
+section "3. Firewall and NAT"
+if have ufw; then
+  sudo ufw status verbose || true
+fi
+if have iptables; then
+  sudo iptables -S DOCKER-USER 2>/dev/null || echo "[INFO] DOCKER-USER chain unavailable"
+  # sed reads the full stream, avoiding the SIGPIPE that head can cause with pipefail.
+  sudo iptables -L FORWARD -n -v --line-numbers 2>/dev/null | sed -n '1,15p' || true
+  sudo iptables -t nat -L DOCKER -n -v --line-numbers 2>/dev/null || true
+fi
+if have nft; then
+  sudo nft list ruleset 2>/dev/null | sed -n '1,160p' || true
+fi
+
+section "4. DNS"
+if getent hosts localhost >/dev/null 2>&1; then
+  echo "[OK] localhost name resolution works"
+else
+  echo "[WARN] localhost name resolution failed"
+fi
+if have resolvectl; then
+  resolvectl status 2>/dev/null | sed -n '1,40p' || true
+else
+  cat /etc/resolv.conf 2>/dev/null || true
+fi
+
+section "5. Docker port publishing and subnet overlap"
+DOCKER=()
+if have docker; then
+  if docker info >/dev/null 2>&1; then
+    DOCKER=(docker)
+  elif sudo -n docker info >/dev/null 2>&1; then
+    DOCKER=(sudo docker)
+  else
+    echo "[INFO] Docker exists, but current user cannot query the daemon"
+  fi
+fi
+
+if ((${#DOCKER[@]})); then
+  "${DOCKER[@]}" ps --format 'table {{.Names}}\t{{.Ports}}' || true
+  host_routes="$( { ip -o -4 route show 2>/dev/null; ip -o -6 route show 2>/dev/null; } |
+    awk '$1 ~ /\\// {print $1}' | sort -u | tr '\n' ' ')"
+
+  while IFS= read -r net_id; do
+    [[ -n "$net_id" ]] || continue
+    details="$("${DOCKER[@]}" network inspect "$net_id" \
+      --format '{{.Name}}{{range .IPAM.Config}} {{.Subnet}}{{end}}' 2>/dev/null || true)"
+    read -r net_name subnet_list <<<"$details"
+    [[ -n "${subnet_list:-}" ]] || continue
+    for subnet in $subnet_list; do
+      echo "Docker network: ${net_name} (${subnet})"
+      python3 - "$subnet" "$net_name" "$host_routes" <<'PY'
+import ipaddress
+import sys
+
+docker_net = ipaddress.ip_network(sys.argv[1], strict=False)
 name = sys.argv[2]
-for r in sys.argv[3].split():
-    hr = ipaddress.ip_network(r, strict=False)
-    if d.overlaps(hr) and d != hr:
-        print(f'  [WARN] Обнаружена коллизия подсетей: Docker {name} ({d}) пересекается с маршрутом хоста {hr}')
-" "${SUBNET}" "${NAME}" "${HOST_ROUTES}"
-        fi
+for route in sys.argv[3].split():
+    try:
+        host_net = ipaddress.ip_network(route, strict=False)
+    except ValueError:
+        continue
+    if docker_net.version == host_net.version and docker_net.overlaps(host_net):
+        print(f"[WARN] Docker network {name} ({docker_net}) overlaps host route {host_net}")
+PY
     done
+  done < <("${DOCKER[@]}" network ls -q 2>/dev/null || true)
 else
-    echo "[INFO] демон Docker недоступен или не установлен, пропуск проверки Docker-сетей."
+  echo "[INFO] Docker subnet inspection skipped"
 fi
 
-echo -e "\n[SUCCESS] Сетевая диагностика успешно завершена."
+section "6. Suggested remote checks"
+cat <<'EOF'
+Run from a client on the affected network:
+  curl -v --connect-timeout 5 http://SERVER_IP:8080/
+  nc -vz SERVER_IP 8080
+On the server, while reproducing the issue:
+  sudo tcpdump -ni any 'tcp port 8080'
+Also verify the application bind address, Docker port mapping (`docker port CONTAINER`),
+the route to the client (`ip route get CLIENT_IP`), and firewall counters.
+EOF
+
+echo
+echo "[SUCCESS] Network diagnostics completed. Findings require interpretation; no firewall rules were changed."

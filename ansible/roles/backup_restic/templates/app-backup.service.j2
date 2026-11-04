@@ -7,10 +7,14 @@ Wants=network-online.target
 Type=oneshot
 User={{ restic_user }}
 Group={{ restic_group }}
+EnvironmentFile=-/etc/restic/aws.env
+Environment=BACKUP_SOURCE={{ backup_source_dir }}
 Environment=RESTIC_CACHE_DIR={{ restic_cache_dir }}
+Environment=RESTIC_PASSWORD_FILE={{ restic_password_file }}
+Environment=RESTIC_REPOSITORY={{ restic_repo_path }}
 ExecStart=/usr/local/bin/backup-app.sh
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={{ restic_repo_path }} {{ restic_cache_dir }} /tmp
+ReadWritePaths={{ restic_local_repo_path if restic_backend == "local" else restic_cache_dir }} {{ restic_cache_dir }}
 ReadOnlyPaths={{ backup_source_dir }} {{ restic_password_file }}

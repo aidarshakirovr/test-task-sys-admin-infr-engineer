@@ -1,0 +1,22 @@
+---
+- name: Validate backup configuration
+  ansible.builtin.assert:
+    that:
+      - restic_backend in ['local', 's3']
+      - restic_password | length >= 20
+      - backup_source_dir is match('^/')
+      - restic_repo_path is string
+      - restic_repo_path | length > 0
+    fail_msg: >-
+      Configure a strong restic password in Ansible Vault, an absolute source
+      directory, and a supported repository backend.
+
+- name: Validate S3 credentials when S3 backend is selected
+  ansible.builtin.assert:
+    that:
+      - aws_access_key | length > 0
+      - aws_secret_key | length > 0
+      - s3_bucket | length > 0
+      - s3_endpoint is match('^[A-Za-z0-9.-]+(:[0-9]+)?$')
+    fail_msg: "S3 backend requires Vault credentials, bucket, and a hostname-only endpoint."
+  when: restic_backend == 's3'

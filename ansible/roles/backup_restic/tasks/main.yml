@@ -1,4 +1,8 @@
 ---
+
+- name: Validate backup configuration
+  ansible.builtin.import_tasks: validate.yml
+
 - name: Validate that restic password is provided
   ansible.builtin.assert:
     that:
