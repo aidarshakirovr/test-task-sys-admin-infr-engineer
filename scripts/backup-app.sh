@@ -8,14 +8,13 @@ BACKUP_SOURCE="${BACKUP_SOURCE:-/srv/app/data}"
 failure_handler() {
     local lineno="$1"
     local exit_code="$2"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] Backup failed at line ${lineno} with exit code ${exit_code}." >&2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] Backup failed at line ${lineno} with exit status ${exit_code}." >&2
     exit "${exit_code}"
 }
 
-# Корректная передача двух раздельных аргументов в обработчик
 trap 'failure_handler "$LINENO" "$?"' ERR
 
-echo "[INFO] Running restic backup of ${BACKUP_SOURCE}..."
+echo "[INFO] Starting restic backup of ${BACKUP_SOURCE}..."
 restic backup \
     --repo "${RESTIC_REPOSITORY}" \
     --password-file "${RESTIC_PASSWORD_FILE}" \
@@ -26,9 +25,10 @@ echo "[INFO] Applying retention policy..."
 restic forget \
     --repo "${RESTIC_REPOSITORY}" \
     --password-file "${RESTIC_PASSWORD_FILE}" \
-    --keep-daily 7 \
+    --keep-hourly 24 \
+    --keep-daily 14 \
     --keep-weekly 4 \
-    --keep-monthly 12 \
+    --keep-monthly 6 \
     --prune
 
-echo "[INFO] Backup cycle completed successfully."
+echo "[INFO] Backup completed successfully."

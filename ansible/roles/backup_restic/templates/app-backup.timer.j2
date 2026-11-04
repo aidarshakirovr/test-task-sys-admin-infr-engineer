@@ -1,10 +1,10 @@
 [Unit]
-Description=Run Application Backup periodically
+Description=Timer for Automated Restic Backup
+Requires=app-backup.service
 
 [Timer]
 OnCalendar={{ restic_schedule }}
 Persistent=true
-RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target

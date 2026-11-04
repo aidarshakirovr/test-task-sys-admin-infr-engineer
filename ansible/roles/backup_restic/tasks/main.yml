@@ -1,17 +1,23 @@
 ---
-- name: Install restic and acl utilities
+- name: Validate restic password is provided
+  ansible.builtin.assert:
+    that:
+      - restic_password | length > 0
+    fail_msg: "ERROR: restic_password must be passed via Ansible Vault or --extra-vars 'restic_password=...'"
+
+- name: Install required packages
   ansible.builtin.apt:
     name: [restic, acl]
     state: present
     update_cache: yes
 
-- name: Create dedicated system group for backups
+- name: Create backup group
   ansible.builtin.group:
     name: "{{ restic_group }}"
     system: yes
     state: present
 
-- name: Create dedicated system user for backups
+- name: Create backup system user
   ansible.builtin.user:
     name: "{{ restic_user }}"
     group: "{{ restic_group }}"
@@ -20,7 +26,7 @@
     create_home: no
     state: present
 
-- name: Create secure configuration directory
+- name: Create secure restic config directory
   ansible.builtin.file:
     path: /etc/restic
     state: directory
@@ -28,7 +34,7 @@
     group: "{{ restic_group }}"
     mode: '0750'
 
-- name: Deploy restic password file
+- name: Deploy restic password file with 0640 permissions
   ansible.builtin.copy:
     content: "{{ restic_password }}\n"
     dest: "{{ restic_password_file }}"
@@ -44,7 +50,13 @@
     group: "{{ restic_group }}"
     mode: '0750'
 
-- name: Apply POSIX ACL (read/traverse) for restic user on source data
+- name: Ensure source directory exists
+  ansible.builtin.file:
+    path: "{{ backup_source_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Apply POSIX ACL (rX) on source directory
   ansible.posix.acl:
     path: "{{ backup_source_dir }}"
     entity: "{{ restic_user }}"
@@ -53,7 +65,7 @@
     state: present
     recursive: yes
 
-- name: Apply default POSIX ACL for inheritance on future files
+- name: Apply default POSIX ACL for inheritance on new files
   ansible.posix.acl:
     path: "{{ backup_source_dir }}"
     entity: "{{ restic_user }}"
@@ -63,7 +75,7 @@
     default: yes
     recursive: yes
 
-- name: Check if restic repository is already initialized
+- name: Check if restic repository is initialized
   ansible.builtin.stat:
     path: "{{ restic_repo_path }}/config"
   register: restic_repo_config
@@ -71,6 +83,7 @@
 - name: Initialize restic repository if not present
   ansible.builtin.command: >
     restic init --repo "{{ restic_repo_path }}" --password-file "{{ restic_password_file }}"
+  become: yes
   become_user: "{{ restic_user }}"
   when: not restic_repo_config.stat.exists
 
