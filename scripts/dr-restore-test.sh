@@ -1,27 +1,40 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-RESTIC_REPO="/var/backups/restic-repo"
-PASS_FILE="/etc/restic/backup.pass"
-TEST_RESTORE_DIR="/tmp/dr-test-restore"
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-/var/backups/restic-repo}"
+RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/restic/backup.pass}"
+RESTORE_TARGET="/tmp/dr-restore-test"
+SOURCE_FILE="/srv/app/data/config.json"
 
-echo "[DR-TEST] 1. Checking repository integrity..."
-restic -r "${RESTIC_REPO}" --password-file "${PASS_FILE}" check
+echo "=== 1. Checking repository integrity ==="
+restic check --repo "${RESTIC_REPOSITORY}" --password-file "${RESTIC_PASSWORD_FILE}"
 
-echo "[DR-TEST] 2. Restoring latest snapshot..."
-rm -rf "${TEST_RESTORE_DIR}"
-mkdir -p "${TEST_RESTORE_DIR}"
+echo "=== 2. Restoring latest snapshot ==="
+rm -rf "${RESTORE_TARGET}"
+mkdir -p "${RESTORE_TARGET}"
 
-restic -r "${RESTIC_REPO}" --password-file "${PASS_FILE}" restore latest \
-    --tag app-prod \
-    --target "${TEST_RESTORE_DIR}"
+restic restore latest \
+    --repo "${RESTIC_REPOSITORY}" \
+    --password-file "${RESTIC_PASSWORD_FILE}" \
+    --target "${RESTORE_TARGET}"
 
-echo "[DR-TEST] 3. Validating restored files..."
-if [ -f "${TEST_RESTORE_DIR}/srv/app/data/config.json" ]; then
-    echo "[DR-TEST] SUCCESS: Essential files restored and verified."
-    rm -rf "${TEST_RESTORE_DIR}"
-    exit 0
-else
-    echo "[DR-TEST] CRITICAL ERROR: Restored structure is corrupted!"
+RESTORED_FILE="${RESTORE_TARGET}${SOURCE_FILE}"
+
+echo "=== 3. Validating files and checksums ==="
+if [[ ! -f "${RESTORED_FILE}" ]]; then
+    echo "[FAIL] Restored file ${RESTORED_FILE} not found!" >&2
     exit 1
 fi
+
+if [[ -f "${SOURCE_FILE}" ]]; then
+    SRC_HASH=$(sha256sum "${SOURCE_FILE}" | awk '{print $1}')
+    RST_HASH=$(sha256sum "${RESTORED_FILE}" | awk '{print $1}')
+    if [[ "${SRC_HASH}" != "${RST_HASH}" ]]; then
+        echo "[FAIL] Checksum mismatch!" >&2
+        exit 1
+    fi
+    echo "[SUCCESS] SHA-256 checksums match perfectly."
+fi
+
+rm -rf "${RESTORE_TARGET}"
+echo "=== DR Smoke Test passed successfully ==="

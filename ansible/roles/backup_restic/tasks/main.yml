@@ -1,58 +1,47 @@
 ---
-- name: Install required packages
+- name: Install restic and acl
   ansible.builtin.apt:
-    name:
-      - restic
-      - acl
-      - curl
+    name: [restic, acl]
     state: present
 
-- name: Create dedicated system group
-  ansible.builtin.group:
-    name: "{{ restic_group }}"
-    state: present
-    system: true
-
-- name: Create dedicated system user
-  ansible.builtin.user:
-    name: "{{ restic_user }}"
-    group: "{{ restic_group }}"
-    system: true
-    shell: /usr/sbin/nologin
-    create_home: true
-    home: /var/cache/restic
-
-- name: Create configuration directory
+- name: Create secure restic config dir
   ansible.builtin.file:
-    path: "{{ restic_config_dir }}"
+    path: /etc/restic
     state: directory
-    owner: root
-    group: "{{ restic_group }}"
+    mode: '0700'
+
+- name: Deploy restic password file
+  ansible.builtin.copy:
+    content: "{{ restic_password }}\n"
+    dest: "{{ restic_password_file }}"
+    mode: '0600'
+
+- name: Ensure backup destination directory exists
+  ansible.builtin.file:
+    path: "{{ restic_repo_path }}"
+    state: directory
     mode: '0750'
 
-- name: Grant read-only access to data folder via ACL
-  ansible.posix.acl:
-    path: "{{ restic_backup_source }}"
-    entity: "{{ restic_user }}"
-    etype: user
-    permissions: rx
-    state: present
-    recursive: true
+- name: Check if restic repository is initialized
+  ansible.builtin.stat:
+    path: "{{ restic_repo_path }}/config"
+  register: restic_repo_config
+
+- name: Initialize restic repository if not present
+  ansible.builtin.command: >
+    restic init --repo "{{ restic_repo_path }}" --password-file "{{ restic_password_file }}"
+  when: not restic_repo_config.stat.exists
 
 - name: Deploy backup script
   ansible.builtin.template:
     src: backup-app.sh.j2
     dest: /usr/local/bin/backup-app.sh
-    owner: root
-    group: root
-    mode: '0755'
+    mode: '0750'
 
 - name: Deploy systemd service unit
   ansible.builtin.template:
     src: app-backup.service.j2
     dest: /etc/systemd/system/app-backup.service
-    owner: root
-    group: root
     mode: '0644'
   notify: Reload systemd
 
@@ -60,15 +49,13 @@
   ansible.builtin.template:
     src: app-backup.timer.j2
     dest: /etc/systemd/system/app-backup.timer
-    owner: root
-    group: root
     mode: '0644'
   notify:
     - Reload systemd
     - Restart backup timer
 
-- name: Ensure timer is enabled and active
+- name: Ensure backup timer is enabled and active
   ansible.builtin.systemd:
     name: app-backup.timer
     state: started
-    enabled: true
+    enabled: yes

@@ -1,38 +1,33 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-export RESTIC_REPOSITORY="/var/backups/restic-repo"
-export RESTIC_PASSWORD_FILE="/etc/restic/backup.pass"
-BACKUP_SOURCE="/srv/app/data"
-BACKUP_TAG="app-prod"
-LOG_TAG="restic-backup"
-
-log() {
-    logger -t "${LOG_TAG}" "$1"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-/var/backups/restic-repo}"
+RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/restic/backup.pass}"
+BACKUP_SOURCE="${BACKUP_SOURCE:-/srv/app/data}"
 
 failure_handler() {
-    local line_no=$1
-    local err_code=$2
-    log "CRITICAL: Backup failed on line ${line_no} with exit code${err_code}"
+    local lineno="$1"
+    local exit_code="$2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] Backup failed at line ${lineno} with exit code${exit_code}." >&2
+    exit "${exit_code}"
 }
-trap 'failure_handler ${LINENO}$?' ERR
 
-log "Starting backup for ${BACKUP_SOURCE}"
+trap 'failure_handler "$LINENO" "$?"' ERR
 
+echo "[INFO] Running restic backup..."
 restic backup \
-    --tag "${BACKUP_TAG}" \
-    --exclude-caches \
-    --one-file-system \
+    --repo "${RESTIC_REPOSITORY}" \
+    --password-file "${RESTIC_PASSWORD_FILE}" \
+    --tag "app-data" \
     "${BACKUP_SOURCE}"
 
+echo "[INFO] Applying retention policy..."
 restic forget \
-    --tag "${BACKUP_TAG}" \
-    --keep-hourly 24 \
-    --keep-daily 14 \
+    --repo "${RESTIC_REPOSITORY}" \
+    --password-file "${RESTIC_PASSWORD_FILE}" \
+    --keep-daily 7 \
     --keep-weekly 4 \
-    --keep-monthly 6 \
+    --keep-monthly 12 \
     --prune
 
-log "Backup completed successfully."
+echo "[INFO] Backup completed successfully."
