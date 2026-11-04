@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export RESTIC_REPOSITORY="{{ restic_repo_path }}"
+export RESTIC_PASSWORD_FILE="{{ restic_config_dir }}/backup.pass"
+BACKUP_SOURCE="{{ restic_backup_source }}"
+BACKUP_TAG="{{ restic_backup_tag }}"
+LOG_TAG="restic-backup"
+
+log() {
+    logger -t "${LOG_TAG}" "$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+failure_handler() {
+    local line_no=$1
+    local err_code=$2
+    log "CRITICAL: Backup failed on line ${line_no} with exit code${err_code}"
+}
+trap 'failure_handler ${LINENO}$?' ERR
+
+log "Starting backup for ${BACKUP_SOURCE}"
+
+restic backup \
+    --tag "${BACKUP_TAG}" \
+    --exclude-caches \
+    --one-file-system \
+    "${BACKUP_SOURCE}"
+
+restic forget \
+    --tag "${BACKUP_TAG}" \
+    --keep-hourly {{ restic_keep_hourly }} \
+    --keep-daily {{ restic_keep_daily }} \
+    --keep-weekly {{ restic_keep_weekly }} \
+    --keep-monthly {{ restic_keep_monthly }} \
+    --prune
+
+log "Backup completed successfully."

@@ -1,0 +1,74 @@
+---
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - restic
+      - acl
+      - curl
+    state: present
+
+- name: Create dedicated system group
+  ansible.builtin.group:
+    name: "{{ restic_group }}"
+    state: present
+    system: true
+
+- name: Create dedicated system user
+  ansible.builtin.user:
+    name: "{{ restic_user }}"
+    group: "{{ restic_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: true
+    home: /var/cache/restic
+
+- name: Create configuration directory
+  ansible.builtin.file:
+    path: "{{ restic_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ restic_group }}"
+    mode: '0750'
+
+- name: Grant read-only access to data folder via ACL
+  ansible.posix.acl:
+    path: "{{ restic_backup_source }}"
+    entity: "{{ restic_user }}"
+    etype: user
+    permissions: rx
+    state: present
+    recursive: true
+
+- name: Deploy backup script
+  ansible.builtin.template:
+    src: backup-app.sh.j2
+    dest: /usr/local/bin/backup-app.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy systemd service unit
+  ansible.builtin.template:
+    src: app-backup.service.j2
+    dest: /etc/systemd/system/app-backup.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Deploy systemd timer unit
+  ansible.builtin.template:
+    src: app-backup.timer.j2
+    dest: /etc/systemd/system/app-backup.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart backup timer
+
+- name: Ensure timer is enabled and active
+  ansible.builtin.systemd:
+    name: app-backup.timer
+    state: started
+    enabled: true

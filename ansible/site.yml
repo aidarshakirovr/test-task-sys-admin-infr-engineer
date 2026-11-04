@@ -1,0 +1,6 @@
+---
+- name: Deploy Restic Backup Solution
+  hosts: backup_servers
+  become: true
+  roles:
+    - backup_restic

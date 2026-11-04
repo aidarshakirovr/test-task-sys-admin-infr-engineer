@@ -1,0 +1,12 @@
+---
+restic_user: "restic-backup"
+restic_group: "restic-backup"
+restic_config_dir: "/etc/restic"
+restic_repo_path: "/var/backups/restic-repo"
+restic_backup_source: "/srv/app/data"
+restic_backup_tag: "app-prod"
+restic_schedule: "00/4:00:00"
+restic_keep_hourly: 24
+restic_keep_daily: 14
+restic_keep_weekly: 4
+restic_keep_monthly: 6
