@@ -5,14 +5,11 @@ restic_repo_path: "/var/backups/restic-repo"
 restic_password_file: "/etc/restic/backup.pass"
 backup_source_dir: "/srv/app/data"
 
-# Расписание бэкапа каждые 4 часа (соответствует RPO <= 4h)
 restic_schedule: "*-*-* 00/4:00:00"
 
-# Политика хранения: 24 часовых, 14 ежедневных, 4 еженедельных, 6 ежемесячных
 restic_keep_hourly: 24
 restic_keep_daily: 14
 restic_keep_weekly: 4
 restic_keep_monthly: 6
 
-# Пароль не хранится в открытом виде, передается через Ansible Vault или --extra-vars
 restic_password: "{{ vault_restic_password | default('') }}"
