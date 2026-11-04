@@ -1,9 +1,21 @@
 ---
-- name: Install UFW
+- name: Build hardening package list
+  ansible.builtin.set_fact:
+    hardening_packages: "{{ ['ufw'] + (['fail2ban'] if hardening_enable_fail2ban | bool else []) + (['unattended-upgrades'] if hardening_enable_unattended_upgrades | bool else []) + (['auditd'] if hardening_enable_auditd | bool else []) }}"
+
+- name: Install base hardening packages
   ansible.builtin.apt:
-    name: [ufw]
+    name: "{{ hardening_packages }}"
     state: present
     update_cache: true
+
+- name: Ensure sshd_config.d exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Resolve deploy user home for authorized_keys check
   ansible.builtin.getent:
@@ -33,36 +45,18 @@
     - (hardening_ssh_password_authentication | string) == 'no'
     - not (hardening_disable_password_auth | bool)
 
-- name: Harden PermitRootLogin and PubkeyAuthentication
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: "{{ item.regexp }}"
-    line: "{{ item.line }}"
-    backup: true
-    validate: "/usr/sbin/sshd -t -f %s"
-  loop:
-    - { regexp: '^#?PermitRootLogin\b', line: "PermitRootLogin {{ hardening_ssh_permit_root_login }}" }
-    - { regexp: '^#?PubkeyAuthentication\b', line: "PubkeyAuthentication {{ hardening_ssh_pubkey_authentication }}" }
-  notify: Restart ssh
-
-- name: Disable PasswordAuthentication only when authorized_keys exist
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^#?PasswordAuthentication\b'
-    line: "PasswordAuthentication no"
-    backup: true
-    validate: "/usr/sbin/sshd -t -f %s"
-  when: hardening_disable_password_auth | bool
-  notify: Restart ssh
-
-- name: Leave PasswordAuthentication enabled when no deploy key is present
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^#?PasswordAuthentication\b'
-    line: "PasswordAuthentication yes"
-    backup: true
-    validate: "/usr/sbin/sshd -t -f %s"
-  when: not (hardening_disable_password_auth | bool)
+- name: Deploy sshd hardening drop-in
+  ansible.builtin.copy:
+    dest: "{{ hardening_sshd_dropin_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/sbin/sshd -t -f /etc/ssh/sshd_config"
+    content: |
+      # Managed by ansible role host_hardening
+      PermitRootLogin {{ hardening_ssh_permit_root_login }}
+      PubkeyAuthentication {{ hardening_ssh_pubkey_authentication }}
+      PasswordAuthentication {{ 'no' if (hardening_disable_password_auth | bool) else 'yes' }}
   notify: Restart ssh
 
 - name: Allow required UFW ports before enable
@@ -87,26 +81,69 @@
     policy: allow
   when: hardening_ufw_enabled | bool
 
-# UFW FORWARD policy alone often blocks published container ports; use DOCKER-USER.
-- name: Allow established/related traffic in DOCKER-USER
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ctstate: ESTABLISHED,RELATED
-    jump: ACCEPT
-    action: insert
-    rule_num: 1
-  when: hardening_docker_user_rules | bool
+- name: Persist DOCKER-USER allows in UFW after.rules
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/after.rules
+    marker: "# {mark} ANSIBLE MANAGED DOCKER-USER"
+    create: true
+    mode: "0640"
+    block: |
+      *filter
+      :DOCKER-USER - [0:0]
+      -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+      {% for item in hardening_ufw_allow if item.proto == 'tcp' %}
+      -A DOCKER-USER -p tcp --dport {{ item.port }} -j ACCEPT
+      {% endfor %}
+      -A DOCKER-USER -j RETURN
+      COMMIT
+  when:
+    - hardening_docker_user_rules | bool
+    - hardening_ufw_enabled | bool
+  notify: Reload ufw
 
-- name: Allow published TCP ports through DOCKER-USER
+- name: Apply runtime DOCKER-USER allows (until reboot / ufw reload)
   ansible.builtin.iptables:
     chain: DOCKER-USER
-    protocol: "{{ item.proto }}"
-    destination_port: "{{ item.port }}"
+    protocol: "{{ item.proto | default(omit) }}"
+    destination_port: "{{ item.port | default(omit) }}"
+    ctstate: "{{ item.ctstate | default(omit) }}"
     jump: ACCEPT
     action: insert
-    rule_num: 2
-  loop: "{{ hardening_ufw_allow | selectattr('proto', 'equalto', 'tcp') | list }}"
+  loop:
+    - { ctstate: "ESTABLISHED,RELATED" }
+    - { proto: "tcp", port: "8080" }
   when: hardening_docker_user_rules | bool
+  failed_when: false
+
+- name: Apply baseline sysctl hardening
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: true
+    reload: true
+  loop: "{{ hardening_sysctl | dict2items }}"
+
+- name: Enable fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: hardening_enable_fail2ban | bool
+
+- name: Enable unattended-upgrades
+  ansible.builtin.service:
+    name: unattended-upgrades
+    state: started
+    enabled: true
+  when: hardening_enable_unattended_upgrades | bool
+
+- name: Enable auditd
+  ansible.builtin.service:
+    name: auditd
+    state: started
+    enabled: true
+  when: hardening_enable_auditd | bool
 
 - name: Ensure Docker config directory exists
   ansible.builtin.file:
@@ -116,13 +153,23 @@
     group: root
     mode: "0755"
 
+- name: Read existing Docker daemon.json for merge
+  ansible.builtin.slurp:
+    src: /etc/docker/daemon.json
+  register: hardening_daemon_json_existing
+  failed_when: false
+
+- name: Build merged Docker daemon.json
+  ansible.builtin.set_fact:
+    hardening_daemon_json_merged: "{{ (hardening_daemon_json_existing.content | default('') | b64decode | default('{}', true) | from_json | default({})) | combine(hardening_docker_daemon_json, recursive=True) }}"
+
 # NOTE: handler restarts Docker and stops containers — maintenance window required.
 # default-address-pools only affect NEW networks; recreate overlapping ones manually.
-- name: Deploy Docker daemon.json with non-colliding address pools
+- name: Deploy merged Docker daemon.json
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json
     owner: root
     group: root
     mode: "0644"
-    content: "{{ hardening_docker_daemon_json | to_nice_json }}\n"
+    content: "{{ hardening_daemon_json_merged | to_nice_json }}\n"
   notify: Restart docker

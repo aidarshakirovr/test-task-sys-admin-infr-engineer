@@ -28,7 +28,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths={{ restic_local_repo_path if restic_backend == "local" else restic_cache_dir }} {{ restic_cache_dir }}
-ReadOnlyPaths={{ backup_source_dir }} {{ restic_password_file }}
+ReadOnlyPaths={{ backup_source_dir }} {{ restic_password_file }}{% if restic_copy_enabled | bool %} {{ restic_secondary_password_file }}{% endif %}
 {% if restic_backend == "s3" or (restic_copy_enabled | bool and restic_secondary_backend == "s3") %}
 ReadOnlyPaths={{ restic_aws_env_file }}
 {% endif %}
+

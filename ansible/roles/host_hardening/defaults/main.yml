@@ -4,6 +4,7 @@ hardening_ssh_password_authentication: "no"
 hardening_ssh_pubkey_authentication: "yes"
 # Deploy user whose authorized_keys must exist before PasswordAuthentication=no.
 hardening_ssh_deploy_user: "{{ ansible_user | default('deployer') }}"
+hardening_sshd_dropin_path: "/etc/ssh/sshd_config.d/99-hardening.conf"
 
 # Allow required access BEFORE enabling UFW to avoid lockout.
 hardening_ufw_enabled: true
@@ -11,9 +12,18 @@ hardening_ufw_allow:
   - { port: "22", proto: "tcp", comment: "SSH" }
   - { port: "8080", proto: "tcp", comment: "app published port" }
 
-# UFW does not manage Docker bridge forwarding; allow published ports in DOCKER-USER.
+# Persist DOCKER-USER allowances across reboot via /etc/ufw/after.rules.
 hardening_docker_user_rules: true
 
+hardening_enable_fail2ban: true
+hardening_enable_unattended_upgrades: true
+hardening_enable_auditd: true
+hardening_sysctl:
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
 
 # Restarting Docker (handler) stops running containers — schedule a maintenance window.
 # default-address-pools applies only to NEW networks; recreate overlapping ones manually.

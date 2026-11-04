@@ -91,15 +91,37 @@ else
   echo "[INFO] Docker subnet inspection skipped"
 fi
 
-section "6. Suggested remote checks"
+section "6. Task-2 style checks (bind, publish, route-to-client)"
+# Bind must be 0.0.0.0 (or expected iface), not only 127.0.0.1.
+if have ss; then
+  ss -tlnp | grep -E ':8080\b' || echo "[INFO] nothing listening on :8080"
+fi
+if ((${#DOCKER[@]})); then
+  while IFS= read -r cname; do
+    [[ -n "$cname" ]] || continue
+    echo "docker port ${cname}:"
+    "${DOCKER[@]}" port "$cname" 2>/dev/null || true
+  done < <("${DOCKER[@]}" ps --format '{{.Names}}' 2>/dev/null || true)
+fi
+CLIENT_IP="${CLIENT_IP:-}"
+if [[ -n "$CLIENT_IP" ]]; then
+  echo "ip route get ${CLIENT_IP}:"
+  ip route get "$CLIENT_IP" 2>/dev/null || true
+else
+  echo "[INFO] Set CLIENT_IP=x.x.x.x to run: ip route get <client>"
+fi
+
+section "7. Suggested remote checks"
 cat <<'EOF'
-Run from a client on the affected network:
-  curl -v --connect-timeout 5 http://SERVER_IP:8080/
-  nc -vz SERVER_IP 8080
-On the server, while reproducing the issue:
-  sudo tcpdump -ni any 'tcp port 8080'
-Also verify the application bind address, Docker port mapping (`docker port CONTAINER`),
-the route to the client (`ip route get CLIENT_IP`), and firewall counters.
+Order for Task 2 incidents:
+  1) client: curl/nc (timeout vs refused)
+  2) ss -tlnp (127.0.0.1 vs 0.0.0.0)
+  3) docker port CONTAINER
+  4) UFW / DOCKER-USER / FORWARD / nat (watch packet counters; do not delete blindly)
+  5) ip route get CLIENT_IP + Docker subnet overlap
+  6) tcpdump while reproducing
+  7) DNS if clients use a name
+See docs/NETWORK_INCIDENT_RUNBOOK.md and docs/NETWORK_INCIDENT_CASE.md.
 EOF
 
 echo

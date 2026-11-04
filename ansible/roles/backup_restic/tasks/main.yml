@@ -10,11 +10,12 @@
     fail_msg: "CRITICAL: restic_password must be passed via Vault or Ansible vars"
   no_log: true
 
-- name: Install required packages
+- name: Install restic package (optional version pin)
   ansible.builtin.apt:
-    name: [restic]
+    name: "{{ 'restic=' ~ restic_package_version if restic_package_version | length > 0 else 'restic' }}"
     state: present
     update_cache: true
+    allow_downgrade: "{{ restic_package_version | length > 0 }}"
 
 - name: Create backup system group
   ansible.builtin.group:
@@ -47,6 +48,16 @@
     group: "{{ restic_group }}"
     mode: "0640"
   no_log: true
+
+- name: Deploy secondary restic password file
+  ansible.builtin.copy:
+    content: "{{ restic_secondary_password }}\n"
+    dest: "{{ restic_secondary_password_file }}"
+    owner: root
+    group: "{{ restic_group }}"
+    mode: "0640"
+  no_log: true
+  when: restic_copy_enabled | bool
 
 - name: Create local backup repository directory
   ansible.builtin.file:

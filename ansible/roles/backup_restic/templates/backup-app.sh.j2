@@ -5,6 +5,9 @@ RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-{{ restic_repo_path }}}"
 RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-{{ restic_password_file }}}"
 RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-{{ restic_cache_dir }}}"
 BACKUP_SOURCE="${BACKUP_SOURCE:-{{ backup_source_dir }}}"
+{% if restic_pre_backup_hook | length > 0 %}
+PRE_BACKUP_HOOK="{{ restic_pre_backup_hook }}"
+{% endif %}
 {% if restic_copy_enabled | bool %}
 RESTIC_SECONDARY_REPOSITORY="${RESTIC_SECONDARY_REPOSITORY:-{{ restic_secondary_repo_path }}}"
 RESTIC_SECONDARY_PASSWORD_FILE="${RESTIC_SECONDARY_PASSWORD_FILE:-{{ restic_secondary_password_file }}}"
@@ -23,6 +26,18 @@ failure_handler() {
 }
 
 trap 'failure_handler "$LINENO" "$?"' ERR
+
+{% if restic_pre_backup_hook | length > 0 %}
+if [[ -x "${PRE_BACKUP_HOOK}" ]]; then
+  echo "[INFO] Running pre-backup hook ${PRE_BACKUP_HOOK} (DB dump / FS snapshot)..."
+  "${PRE_BACKUP_HOOK}"
+else
+  echo "[ERROR] restic_pre_backup_hook is set but not executable: ${PRE_BACKUP_HOOK}" >&2
+  exit 1
+fi
+{% else %}
+# If /srv/app/data holds a live DB, set restic_pre_backup_hook to a dump/snapshot script.
+{% endif %}
 
 echo "[INFO] Starting restic backup of ${BACKUP_SOURCE}..."
 restic backup \

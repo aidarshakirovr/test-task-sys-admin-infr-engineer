@@ -10,8 +10,9 @@
   hosts: backup_admin
   become: true
   vars:
-    # Prefer secondary (offsite) repo; fall back to primary without self-reference.
-    retention_repo: "{{ restic_secondary_repo_path | default(restic_primary_repo_path | default(restic_local_repo_path), true) }}"
+    retention_primary: "{{ restic_primary_repo_path | default(restic_local_repo_path) }}"
+    retention_secondary: "{{ restic_secondary_repo_path | default('', true) }}"
+    retention_targets: "{{ ([retention_primary] + ([retention_secondary] if (restic_prune_dual | default(true) | bool and retention_secondary | length > 0 and retention_secondary != retention_primary) else [])) }}"
   tasks:
     - name: Require restic password
       ansible.builtin.assert:
@@ -20,22 +21,21 @@
         fail_msg: "Provide vault_restic_password for retention runs."
       no_log: true
 
-    - name: Require retention repository path
+    - name: Require at least one retention repository
       ansible.builtin.assert:
         that:
-          - retention_repo is string
-          - retention_repo | length > 0
-        fail_msg: "Set restic_secondary_repo_path or restic_primary_repo_path / restic_local_repo_path."
+          - retention_targets | length > 0
+        fail_msg: "Set restic_primary_repo_path / restic_local_repo_path (and optional secondary)."
 
-    - name: Apply forget and prune
+    - name: Apply forget and prune to each retention target
       ansible.builtin.command:
         argv:
           - restic
           - forget
           - --repo
-          - "{{ retention_repo }}"
+          - "{{ item }}"
           - --password-file
-          - "{{ restic_password_file }}"
+          - "{{ restic_secondary_password_file if (item == retention_secondary) else restic_password_file }}"
           - --keep-hourly
           - "{{ restic_keep_hourly }}"
           - --keep-daily
@@ -45,5 +45,6 @@
           - --keep-monthly
           - "{{ restic_keep_monthly }}"
           - --prune
+      loop: "{{ retention_targets }}"
       environment: "{{ restic_s3_environment | default({}) }}"
       no_log: true
