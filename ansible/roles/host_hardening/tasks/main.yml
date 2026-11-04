@@ -1,0 +1,57 @@
+---
+- name: Install UFW
+  ansible.builtin.apt:
+    name: [ufw]
+    state: present
+    update_cache: true
+
+- name: Configure SSH hardening
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backup: true
+  loop:
+    - { regexp: '^#?PermitRootLogin\b', line: "PermitRootLogin {{ hardening_ssh_permit_root_login }}" }
+    - { regexp: '^#?PasswordAuthentication\b', line: "PasswordAuthentication {{ hardening_ssh_password_authentication }}" }
+    - { regexp: '^#?PubkeyAuthentication\b', line: "PubkeyAuthentication {{ hardening_ssh_pubkey_authentication }}" }
+  notify: Restart ssh
+
+- name: Allow required UFW ports before enable
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ hardening_ufw_allow }}"
+  when: hardening_ufw_enabled | bool
+
+- name: Enable UFW default deny incoming
+  community.general.ufw:
+    state: enabled
+    direction: incoming
+    policy: deny
+  when: hardening_ufw_enabled | bool
+
+- name: Set UFW default allow outgoing
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+  when: hardening_ufw_enabled | bool
+
+- name: Ensure Docker config directory exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Docker daemon.json with non-colliding address pools
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ hardening_docker_daemon_json | to_nice_json }}\n"
+  notify: Restart docker

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-/var/backups/restic-repo}"
-RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/restic/backup.pass}"
-RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/var/cache/restic-backup}"
-BACKUP_SOURCE="${BACKUP_SOURCE:-/srv/app/data}"
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-{{ restic_repo_path }}}"
+RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-{{ restic_password_file }}}"
+RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-{{ restic_cache_dir }}}"
+BACKUP_SOURCE="${BACKUP_SOURCE:-{{ backup_source_dir }}}"
+{% if restic_copy_enabled | bool %}
+RESTIC_SECONDARY_REPOSITORY="${RESTIC_SECONDARY_REPOSITORY:-{{ restic_secondary_repo_path }}}"
+RESTIC_SECONDARY_PASSWORD_FILE="${RESTIC_SECONDARY_PASSWORD_FILE:-{{ restic_secondary_password_file }}}"
+{% endif %}
+{% if restic_healthcheck_url | length > 0 %}
+HEALTHCHECK_URL="{{ restic_healthcheck_url }}"
+{% endif %}
 
 export RESTIC_CACHE_DIR
 
@@ -27,14 +34,20 @@ restic backup \
 {% endfor %}
     "${BACKUP_SOURCE}"
 
-echo "[INFO] Applying retention policy..."
-restic forget \
-    --repo "${RESTIC_REPOSITORY}" \
-    --password-file "${RESTIC_PASSWORD_FILE}" \
-    --keep-hourly {{ restic_keep_hourly }} \
-    --keep-daily {{ restic_keep_daily }} \
-    --keep-weekly {{ restic_keep_weekly }} \
-    --keep-monthly {{ restic_keep_monthly }} \
-    --prune
+{% if restic_copy_enabled | bool %}
+echo "[INFO] Copying new snapshots to secondary (offsite) repository..."
+restic copy \
+    --repo "${RESTIC_SECONDARY_REPOSITORY}" \
+    --password-file "${RESTIC_SECONDARY_PASSWORD_FILE}" \
+    --from-repo "${RESTIC_REPOSITORY}" \
+    --from-password-file "${RESTIC_PASSWORD_FILE}"
+{% endif %}
 
-echo "[INFO] Backup completed successfully."
+{% if restic_healthcheck_url | length > 0 %}
+if command -v curl >/dev/null 2>&1; then
+  curl -fsS -m 10 --retry 2 "${HEALTHCHECK_URL}" >/dev/null || true
+fi
+{% endif %}
+
+echo "[INFO] Backup completed successfully. Retention/prune is NOT run on this host."
+echo "[INFO] Apply forget/prune from a separate admin host (ansible/playbooks/backup-retention.yml)."

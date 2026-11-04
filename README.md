@@ -1,26 +1,58 @@
 # Systems Administrator / Infrastructure Engineer — Test Task
 
+## What lives where
+
+| Path | Purpose |
+|------|---------|
+| `ansible/roles/backup_restic/` | Restic backup user, repo init, systemd timer/service, check & RPO timers |
+| `ansible/roles/host_hardening/` | SSH hardening, UFW (allow then enable), Docker `daemon.json` pools |
+| `ansible/playbooks/backup-retention.yml` | `forget --prune` from a **separate** admin host only |
+| `ansible/site.yml` | Hardening + backup roles |
+| `ansible/inventories/` | staging / production inventories |
+| `scripts/dr-restore-test.sh` | Sample DR restore (random files, timing, optional smoke) |
+| `scripts/network-diagnostics.sh` | Read-only network / Docker / firewall snapshot |
+| `docs/DISASTER_RECOVERY.md` | Restore + DR plan, consistency, RTO hypothesis |
+| `docs/NETWORK_INCIDENT_RUNBOOK.md` | Ordered production network incident checks |
+| `docker/compose.yaml` | Example published web service |
+
 ## Backup and recovery
 
-The project uses Restic for encrypted, deduplicated backups. The role supports a local repository and an S3-compatible repository. Configure secrets with Ansible Vault; the defaults intentionally do not contain a usable password.
+- **Tool:** Restic (encrypted, deduplicated). Scheduling via **systemd timer** (`restic_schedule`, every 4 hours).
+- **Prune:** not on the backup host. Retention runs from `ansible/playbooks/backup-retention.yml`; give the app host an S3 key **without** delete.
+- **Offsite:** set `restic_copy_enabled: true` and `restic_secondary_repo_path` so each run executes `restic copy`.
+- **Access to data:** `AmbientCapabilities=CAP_DAC_READ_SEARCH` (no recursive ACL on 100 GB).
+- **Secrets:** Ansible Vault. Tasks that handle passwords/keys use `no_log: true`.
 
-The intended backup interval is four hours (target RPO <= 4 hours), provided the deployed systemd timer consumes `restic_schedule` and successful runs are monitored. The RTO is not asserted as achieved until a full restore is timed.
+### Create and encrypt Vault
 
-A local repository on the source host is not ransomware-resistant. S3 Object Lock or an append-only backup server must be configured independently and verified before claiming immutable backup protection.
+```bash
+cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
+# edit vault_restic_password / vault_s3_* then:
+ansible-vault encrypt ansible/group_vars/all/vault.yml
+ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/site.yml \
+  --ask-vault-pass --check --diff
+```
 
-See `docs/DISASTER_RECOVERY.md` for restore procedures and DR verification.
+Target RPO ≤ 4 hours (timer + RPO age check). RTO is a **hypothesis** until a full restore is timed — see `docs/DISASTER_RECOVERY.md`.
 
-## Network diagnostics
-
-Run:
+## Network diagnostics and incident response
 
 ```bash
 bash scripts/network-diagnostics.sh
 ```
 
-The script reports listening sockets, routes, forwarding, firewall/NAT state, DNS, Docker published ports, and possible Docker subnet overlaps. It does not modify firewall or network configuration.
+Ordered incident runbook: `docs/NETWORK_INCIDENT_RUNBOOK.md`  
+(client `curl`/`nc` → `ss` → `docker port` → UFW/`DOCKER-USER`/FORWARD/NAT with counters → `ip route get` / Docker overlap → `tcpdump` → DNS). Do not delete firewall rules blindly.
 
-For an external reachability incident, also test from a second machine with `curl`/`nc` and capture packets with `tcpdump`.
+## What was verified vs not
+
+| Item | Status |
+|------|--------|
+| Role templates / scripts syntax intent | Present in repo; run `bash -n` / `ansible-playbook --syntax-check` locally |
+| Ansible `--check` on disposable staging VM | **Not claimed** until you run it |
+| Live S3 Object Lock / append-only rest-server | **Must be configured and tested outside defaults** |
+| Full 100 GB restore timing (RTO) | **Not measured** — hypothesis only |
+| Sample DR script against real data | **Not claimed** until executed on a host with a real repo |
 
 ## Validation
 
@@ -30,4 +62,4 @@ ansible-playbook -i ansible/inventories/staging/hosts.ini ansible/site.yml --syn
 bash -n scripts/network-diagnostics.sh scripts/dr-restore-test.sh
 ```
 
-Run Ansible `--check` against a disposable staging VM before production. Do not run the DR test until the repository and password file already exist.
+Run Ansible `--check --diff` against a disposable staging VM before production. Do not run the DR test until the repository and password file already exist.

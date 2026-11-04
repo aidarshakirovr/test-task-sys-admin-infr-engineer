@@ -1,0 +1,20 @@
+---
+hardening_ssh_permit_root_login: "no"
+hardening_ssh_password_authentication: "no"
+hardening_ssh_pubkey_authentication: "yes"
+
+# Allow required access BEFORE enabling UFW to avoid lockout.
+hardening_ufw_enabled: true
+hardening_ufw_allow:
+  - { port: "22", proto: "tcp", comment: "SSH" }
+  - { port: "8080", proto: "tcp", comment: "app published port" }
+
+# Avoid Docker default 172.17.0.0/16 colliding with site LAN.
+hardening_docker_daemon_json:
+  default-address-pools:
+    - base: "172.30.0.0/16"
+      size: 24
+  log-driver: "json-file"
+  log-opts:
+    max-size: "50m"
+    max-file: "5"

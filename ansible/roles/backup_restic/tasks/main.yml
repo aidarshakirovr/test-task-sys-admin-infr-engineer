@@ -8,26 +8,27 @@
     that:
       - restic_password | length > 0
     fail_msg: "CRITICAL: restic_password must be passed via Vault or Ansible vars"
+  no_log: true
 
 - name: Install required packages
   ansible.builtin.apt:
-    name: [restic, acl]
+    name: [restic]
     state: present
-    update_cache: yes
+    update_cache: true
 
 - name: Create backup system group
   ansible.builtin.group:
     name: "{{ restic_group }}"
-    system: yes
+    system: true
     state: present
 
 - name: Create backup system user
   ansible.builtin.user:
     name: "{{ restic_user }}"
     group: "{{ restic_group }}"
-    system: yes
+    system: true
     shell: /usr/sbin/nologin
-    create_home: no
+    create_home: false
     state: present
 
 - name: Create secure restic configuration directory
@@ -36,7 +37,7 @@
     state: directory
     owner: root
     group: "{{ restic_group }}"
-    mode: '0750'
+    mode: "0750"
 
 - name: Deploy restic password file with 0640 permissions
   ansible.builtin.copy:
@@ -44,15 +45,17 @@
     dest: "{{ restic_password_file }}"
     owner: root
     group: "{{ restic_group }}"
-    mode: '0640'
+    mode: "0640"
+  no_log: true
 
-- name: Create backup repository directory
+- name: Create local backup repository directory
   ansible.builtin.file:
-    path: "{{ restic_repo_path }}"
+    path: "{{ restic_local_repo_path }}"
     state: directory
     owner: "{{ restic_user }}"
     group: "{{ restic_group }}"
-    mode: '0750'
+    mode: "0750"
+  when: restic_backend == "local"
 
 - name: Create dedicated restic cache directory
   ansible.builtin.file:
@@ -60,43 +63,99 @@
     state: directory
     owner: "{{ restic_user }}"
     group: "{{ restic_group }}"
-    mode: '0750'
+    mode: "0750"
 
 - name: Ensure backup source directory exists without overriding mode
   ansible.builtin.file:
     path: "{{ backup_source_dir }}"
     state: directory
 
-- name: Apply POSIX ACL (rX) on source directory for restic user
-  ansible.posix.acl:
-    path: "{{ backup_source_dir }}"
-    entity: "{{ restic_user }}"
-    etype: user
-    permissions: "rX"
-    state: present
-    recursive: yes
+- name: Deploy AWS credentials env file for S3 backends
+  ansible.builtin.copy:
+    content: |
+      AWS_ACCESS_KEY_ID={{ aws_access_key }}
+      AWS_SECRET_ACCESS_KEY={{ aws_secret_key }}
+    dest: "{{ restic_aws_env_file }}"
+    owner: root
+    group: "{{ restic_group }}"
+    mode: "0640"
+  no_log: true
+  when: restic_backend == "s3" or (restic_copy_enabled | bool and restic_secondary_backend == "s3")
 
-- name: Apply default POSIX ACL for inheritance on future files
-  ansible.posix.acl:
-    path: "{{ backup_source_dir }}"
-    entity: "{{ restic_user }}"
-    etype: user
-    permissions: "rX"
-    state: present
-    default: yes
-    recursive: yes
-
-- name: Check if restic repository is already initialized
-  ansible.builtin.stat:
-    path: "{{ restic_repo_path }}/config"
-  register: restic_repo_config
-
-- name: Initialize restic repository if not present
-  ansible.builtin.command: >
-    restic init --repo "{{ restic_repo_path }}" --password-file "{{ restic_password_file }}" --cache-dir "{{ restic_cache_dir }}"
-  become: yes
+- name: Check if primary restic repository is already initialized
+  ansible.builtin.command:
+    argv:
+      - restic
+      - snapshots
+      - --repo
+      - "{{ restic_repo_path }}"
+      - --password-file
+      - "{{ restic_password_file }}"
+      - --cache-dir
+      - "{{ restic_cache_dir }}"
+  environment: "{{ restic_s3_environment }}"
+  become: true
   become_user: "{{ restic_user }}"
-  when: not restic_repo_config.stat.exists
+  register: restic_repo_probe
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Initialize primary restic repository if not present
+  ansible.builtin.command:
+    argv:
+      - restic
+      - init
+      - --repo
+      - "{{ restic_repo_path }}"
+      - --password-file
+      - "{{ restic_password_file }}"
+      - --cache-dir
+      - "{{ restic_cache_dir }}"
+  environment: "{{ restic_s3_environment }}"
+  become: true
+  become_user: "{{ restic_user }}"
+  when: restic_repo_probe.rc != 0
+  no_log: true
+
+- name: Check if secondary restic repository is already initialized
+  ansible.builtin.command:
+    argv:
+      - restic
+      - snapshots
+      - --repo
+      - "{{ restic_secondary_repo_path }}"
+      - --password-file
+      - "{{ restic_secondary_password_file }}"
+      - --cache-dir
+      - "{{ restic_cache_dir }}"
+  environment: "{{ restic_s3_environment }}"
+  become: true
+  become_user: "{{ restic_user }}"
+  register: restic_secondary_probe
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: restic_copy_enabled | bool
+
+- name: Initialize secondary restic repository if not present
+  ansible.builtin.command:
+    argv:
+      - restic
+      - init
+      - --repo
+      - "{{ restic_secondary_repo_path }}"
+      - --password-file
+      - "{{ restic_secondary_password_file }}"
+      - --cache-dir
+      - "{{ restic_cache_dir }}"
+  environment: "{{ restic_s3_environment }}"
+  become: true
+  become_user: "{{ restic_user }}"
+  when:
+    - restic_copy_enabled | bool
+    - restic_secondary_probe.rc != 0
+  no_log: true
 
 - name: Deploy backup script
   ansible.builtin.template:
@@ -104,7 +163,23 @@
     dest: /usr/local/bin/backup-app.sh
     owner: root
     group: "{{ restic_group }}"
-    mode: '0750'
+    mode: "0750"
+
+- name: Deploy repository check script
+  ansible.builtin.template:
+    src: restic-check.sh.j2
+    dest: /usr/local/bin/restic-check.sh
+    owner: root
+    group: "{{ restic_group }}"
+    mode: "0750"
+
+- name: Deploy RPO age check script
+  ansible.builtin.template:
+    src: restic-rpo-check.sh.j2
+    dest: /usr/local/bin/restic-rpo-check.sh
+    owner: root
+    group: "{{ restic_group }}"
+    mode: "0750"
 
 - name: Deploy systemd service unit
   ansible.builtin.template:
@@ -112,7 +187,16 @@
     dest: /etc/systemd/system/app-backup.service
     owner: root
     group: root
-    mode: '0644'
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Deploy backup failure alert unit
+  ansible.builtin.template:
+    src: app-backup-failure.service.j2
+    dest: /etc/systemd/system/app-backup-failure.service
+    owner: root
+    group: root
+    mode: "0644"
   notify: Reload systemd
 
 - name: Deploy systemd timer unit
@@ -121,13 +205,65 @@
     dest: /etc/systemd/system/app-backup.timer
     owner: root
     group: root
-    mode: '0644'
+    mode: "0644"
   notify:
     - Reload systemd
     - Restart backup timer
+
+- name: Deploy weekly restic check service
+  ansible.builtin.template:
+    src: app-backup-check.service.j2
+    dest: /etc/systemd/system/app-backup-check.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Deploy weekly restic check timer
+  ansible.builtin.template:
+    src: app-backup-check.timer.j2
+    dest: /etc/systemd/system/app-backup-check.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart check timer
+
+- name: Deploy RPO check service
+  ansible.builtin.template:
+    src: app-backup-rpo.service.j2
+    dest: /etc/systemd/system/app-backup-rpo.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Deploy RPO check timer
+  ansible.builtin.template:
+    src: app-backup-rpo.timer.j2
+    dest: /etc/systemd/system/app-backup-rpo.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart rpo timer
 
 - name: Ensure backup timer is enabled and active
   ansible.builtin.systemd:
     name: app-backup.timer
     state: started
-    enabled: yes
+    enabled: true
+
+- name: Ensure weekly check timer is enabled and active
+  ansible.builtin.systemd:
+    name: app-backup-check.timer
+    state: started
+    enabled: true
+
+- name: Ensure RPO check timer is enabled and active
+  ansible.builtin.systemd:
+    name: app-backup-rpo.timer
+    state: started
+    enabled: true

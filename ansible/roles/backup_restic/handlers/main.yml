@@ -7,3 +7,13 @@
   ansible.builtin.systemd:
     name: app-backup.timer
     state: restarted
+
+- name: Restart check timer
+  ansible.builtin.systemd:
+    name: app-backup-check.timer
+    state: restarted
+
+- name: Restart rpo timer
+  ansible.builtin.systemd:
+    name: app-backup-rpo.timer
+    state: restarted

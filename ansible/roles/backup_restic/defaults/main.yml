@@ -3,6 +3,7 @@ restic_user: "restic-backup"
 restic_group: "restic-backup"
 restic_cache_dir: "/var/cache/restic-backup"
 restic_password_file: "/etc/restic/backup.pass"
+restic_aws_env_file: "/etc/restic/aws.env"
 backup_source_dir: "/srv/app/data"
 
 # Select "local" or "s3". For S3, use a host name only (no Markdown and no bucket path).
@@ -13,15 +14,26 @@ s3_bucket: "company-infrastructure-backups"
 restic_s3_repo_path: "s3:{{ s3_endpoint }}/{{ s3_bucket }}"
 restic_repo_path: "{{ restic_s3_repo_path if restic_backend == 's3' else restic_local_repo_path }}"
 
+# Optional second repository for offsite copy after each backup (restic copy).
+# Prefer a bucket/key without DeleteObject; prune runs only from an admin host.
+restic_copy_enabled: false
+restic_secondary_backend: "s3"
+restic_secondary_repo_path: "s3:{{ s3_endpoint }}/{{ s3_bucket }}-offsite"
+restic_secondary_password_file: "{{ restic_password_file }}"
+
 # Supply secrets through Ansible Vault; empty defaults intentionally fail validation.
 restic_password: "{{ vault_restic_password | default('') }}"
 aws_access_key: "{{ vault_s3_access_key | default('') }}"
 aws_secret_key: "{{ vault_s3_secret_key | default('') }}"
 
-# Four-hour schedule; actual timer must consume this variable.
+# Four-hour schedule; timer consumes this variable.
 restic_schedule: "*-*-* 00/4:00:00"
+restic_check_schedule: "Sun *-*-* 03:30:00"
+restic_rpo_check_schedule: "*-*-* 01/4:15:00"
+restic_rpo_hours: 4
 
-# Retention policy; the backup/forget template must consume these variables.
+# Retention is applied ONLY from an admin host (see playbooks/backup-retention.yml).
+# Do not put forget --prune in the on-host backup script.
 restic_keep_hourly: 24
 restic_keep_daily: 14
 restic_keep_weekly: 8
@@ -32,6 +44,10 @@ restic_excludes:
   - "*.log"
   - ".cache/**"
   - "lost+found"
+
+# Optional Healthchecks.io (or compatible) ping URL for success/failure.
+restic_healthcheck_url: ""
+restic_failure_healthcheck_url: ""
 
 restic_ionice_class: 2
 restic_ionice_level: 7

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-{{ restic_repo_path }}}"
+RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-{{ restic_password_file }}}"
+RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-{{ restic_cache_dir }}}"
+RPO_HOURS="${RPO_HOURS:-{{ restic_rpo_hours }}}"
+{% if restic_failure_healthcheck_url | length > 0 %}
+FAILURE_HEALTHCHECK_URL="{{ restic_failure_healthcheck_url }}"
+{% endif %}
+
+export RESTIC_CACHE_DIR
+
+fail() {
+  echo "[ERROR] $*" >&2
+{% if restic_failure_healthcheck_url | length > 0 %}
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -m 10 --retry 2 "${FAILURE_HEALTHCHECK_URL}" >/dev/null || true
+  fi
+{% endif %}
+  exit 1
+}
+
+LATEST_JSON="$(restic snapshots --repo "${RESTIC_REPOSITORY}" --password-file "${RESTIC_PASSWORD_FILE}" --latest 1 --json)"
+LATEST_TIME="$(printf '%s' "${LATEST_JSON}" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data[0]["time"] if data else "")')"
+[[ -n "${LATEST_TIME}" ]] || fail "No snapshots found in ${RESTIC_REPOSITORY}"
+
+# Keep/report last snapshot update time for operators.
+echo "[INFO] Last snapshot update time: ${LATEST_TIME}"
+
+python3 - "${LATEST_TIME}" "${RPO_HOURS}" <<'PY'
+import sys
+from datetime import datetime, timezone
+
+raw = sys.argv[1]
+rpo_hours = int(sys.argv[2])
+# restic JSON timestamps look like 2026-11-04T18:09:39.123456+03:00
+ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+now = datetime.now(timezone.utc)
+age_hours = (now - ts.astimezone(timezone.utc)).total_seconds() / 3600.0
+print(f"[INFO] Snapshot age: {age_hours:.2f}h (RPO limit {rpo_hours}h)")
+if age_hours > rpo_hours:
+    raise SystemExit(f"RPO breached: latest snapshot is {age_hours:.2f}h old")
+PY
+
+echo "[OK] Latest snapshot is within RPO of ${RPO_HOURS} hours."

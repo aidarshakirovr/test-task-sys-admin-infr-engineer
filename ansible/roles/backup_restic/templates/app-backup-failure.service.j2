@@ -1,0 +1,9 @@
+[Unit]
+Description=Alert when app-backup.service fails
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'echo "[$(date "+%%Y-%%m-%%d %%H:%%M:%%S")] [ALERT] app-backup.service failed" >&2{% if restic_failure_healthcheck_url | length > 0 %}; command -v curl >/dev/null && curl -fsS -m 10 --retry 2 "{{ restic_failure_healthcheck_url }}" >/dev/null || true{% endif %}'
+User=root
+Group=root

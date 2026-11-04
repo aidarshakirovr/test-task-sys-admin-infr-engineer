@@ -1,0 +1,9 @@
+[Unit]
+Description=Timer for RPO snapshot-age verification
+
+[Timer]
+OnCalendar={{ restic_rpo_check_schedule }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

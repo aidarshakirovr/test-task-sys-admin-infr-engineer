@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-{{ restic_repo_path }}}"
+RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-{{ restic_password_file }}}"
+RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-{{ restic_cache_dir }}}"
+
+export RESTIC_CACHE_DIR
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] Weekly restic check starting..."
+restic check \
+    --repo "${RESTIC_REPOSITORY}" \
+    --password-file "${RESTIC_PASSWORD_FILE}" \
+    --read-data-subset=10%
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] Weekly restic check completed."

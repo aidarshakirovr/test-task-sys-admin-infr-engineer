@@ -1,0 +1,41 @@
+---
+# Run ONLY from a separate admin host / break-glass identity.
+# Application backup hosts must not receive delete permissions on the S3 bucket.
+#
+# Example:
+#   ansible-playbook -i ansible/inventories/staging/hosts.ini \
+#     ansible/playbooks/backup-retention.yml --check --diff
+
+- name: Apply Restic retention (forget --prune) from admin context
+  hosts: backup_admin
+  become: true
+  vars:
+    restic_repo_path: "{{ restic_secondary_repo_path | default(restic_repo_path) }}"
+  tasks:
+    - name: Require restic password
+      ansible.builtin.assert:
+        that:
+          - restic_password | length >= 20
+        fail_msg: "Provide vault_restic_password for retention runs."
+      no_log: true
+
+    - name: Apply forget and prune
+      ansible.builtin.command:
+        argv:
+          - restic
+          - forget
+          - --repo
+          - "{{ restic_repo_path }}"
+          - --password-file
+          - "{{ restic_password_file }}"
+          - --keep-hourly
+          - "{{ restic_keep_hourly }}"
+          - --keep-daily
+          - "{{ restic_keep_daily }}"
+          - --keep-weekly
+          - "{{ restic_keep_weekly }}"
+          - --keep-monthly
+          - "{{ restic_keep_monthly }}"
+          - --prune
+      environment: "{{ restic_s3_environment | default({}) }}"
+      no_log: true

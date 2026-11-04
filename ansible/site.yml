@@ -1,6 +1,14 @@
 ---
+- name: Deploy host hardening baseline
+  hosts: backup_servers
+  become: true
+  roles:
+    - role: host_hardening
+      tags: [hardening]
+
 - name: Deploy Restic Backup Solution
   hosts: backup_servers
   become: true
   roles:
-    - backup_restic
+    - role: backup_restic
+      tags: [backup]
