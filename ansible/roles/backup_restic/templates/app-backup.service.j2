@@ -7,9 +7,10 @@ Wants=network-online.target
 Type=oneshot
 User={{ restic_user }}
 Group={{ restic_group }}
+Environment=RESTIC_CACHE_DIR={{ restic_cache_dir }}
 ExecStart=/usr/local/bin/backup-app.sh
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={{ restic_repo_path }} /tmp
+ReadWritePaths={{ restic_repo_path }} {{ restic_cache_dir }} /tmp
 ReadOnlyPaths={{ backup_source_dir }} {{ restic_password_file }}

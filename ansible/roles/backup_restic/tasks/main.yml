@@ -3,7 +3,7 @@
   ansible.builtin.assert:
     that:
       - restic_password | length > 0
-    fail_msg: "CRITICAL: restic_password must be passed via Ansible Vault"
+    fail_msg: "CRITICAL: restic_password must be passed via Vault or Ansible vars"
 
 - name: Install required packages
   ansible.builtin.apt:
@@ -50,6 +50,14 @@
     group: "{{ restic_group }}"
     mode: '0750'
 
+- name: Create dedicated restic cache directory
+  ansible.builtin.file:
+    path: "{{ restic_cache_dir }}"
+    state: directory
+    owner: "{{ restic_user }}"
+    group: "{{ restic_group }}"
+    mode: '0750'
+
 - name: Ensure backup source directory exists without overriding mode
   ansible.builtin.file:
     path: "{{ backup_source_dir }}"
@@ -81,7 +89,7 @@
 
 - name: Initialize restic repository if not present
   ansible.builtin.command: >
-    restic init --repo "{{ restic_repo_path }}" --password-file "{{ restic_password_file }}"
+    restic init --repo "{{ restic_repo_path }}" --password-file "{{ restic_password_file }}" --cache-dir "{{ restic_cache_dir }}"
   become: yes
   become_user: "{{ restic_user }}"
   when: not restic_repo_config.stat.exists

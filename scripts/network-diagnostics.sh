@@ -15,11 +15,16 @@ HOST_ROUTES=$(ip route | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' || tr
 echo "Маршруты хоста:"
 echo "${HOST_ROUTES}"
 
+DOCKER_CMD="docker"
+if ! docker ps &>/dev/null && command -v sudo &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+fi
+
 if command -v docker &>/dev/null; then
     echo -e "\nПодсети Docker:"
-    docker network ls -q | while read -r net_id; do
-        SUBNET=$(docker network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
-        NAME=$(docker network inspect "$net_id" --format '{{.Name}}' 2>/dev/null || true)
+    $DOCKER_CMD network ls -q 2>/dev/null | while read -r net_id; do
+        SUBNET=$($DOCKER_CMD network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
+        NAME=$($DOCKER_CMD network inspect "$net_id" --format '{{.Name}}' 2>/dev/null || true)
         if [[ -n "$SUBNET" ]]; then
             echo "- Сеть '${NAME}': ${SUBNET}"
             python3 -c "
@@ -33,7 +38,7 @@ try:
         try:
             h_net = ipaddress.ip_network(r, strict=False)
             if d_net.overlaps(h_net):
-                print(f'  [WARN] Обнаружена коллизия: сеть Docker {net_name} ({d_net}) пересекается с маршрутом хоста ({h_net})')
+                print(f'  [WARN] Коллизия: сеть Docker {net_name} ({d_net}) пересекается с маршрутом хоста ({h_net})')
         except ValueError:
             pass
 except ValueError:

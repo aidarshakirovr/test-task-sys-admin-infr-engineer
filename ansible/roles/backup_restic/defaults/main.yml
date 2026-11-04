@@ -2,6 +2,7 @@
 restic_user: "restic-backup"
 restic_group: "restic-backup"
 restic_repo_path: "/var/backups/restic-repo"
+restic_cache_dir: "/var/cache/restic-backup"
 restic_password_file: "/etc/restic/backup.pass"
 backup_source_dir: "/srv/app/data"
 

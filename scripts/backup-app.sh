@@ -3,7 +3,10 @@ set -Eeuo pipefail
 
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-/var/backups/restic-repo}"
 RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/restic/backup.pass}"
+RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/var/cache/restic-backup}"
 BACKUP_SOURCE="${BACKUP_SOURCE:-/srv/app/data}"
+
+export RESTIC_CACHE_DIR
 
 failure_handler() {
     local lineno="$1"
